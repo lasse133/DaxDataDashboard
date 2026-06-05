@@ -103,12 +103,13 @@ def live_feed():
         df["risk_drivers"] = df["risk_drivers"].apply(", ".join)
 
         def _row_style(row):
-            color = {"negative": "#5a1f1f", "positive": "#1f4020"}.get(row["sentiment"], "")
-            return [f"background-color: {color}" if color else "" for _ in row]
+            color = {"negative": "#983a3a", "positive": "#4b964e"}.get(row["sentiment"], "")
+            bg = f"background-color: {color}; " if color else ""
+            return [f"{bg}color: white" for _ in row]
 
         st.dataframe(
             df.style.apply(_row_style, axis=1),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     else:
@@ -147,7 +148,7 @@ def price_panel():
         config.TICKER_TO_NAME.get(t, t): p["history"]
         for t, p in prices.items()
     })
-    st.line_chart(chart_df, use_container_width=True)
+    st.line_chart(chart_df, width='stretch')
 
 
 price_panel()
