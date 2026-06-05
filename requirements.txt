@@ -1,5 +1,12 @@
-pandas
-requests
+# Dashboard (streaming app)
+streamlit>=1.33
+yfinance>=0.2.40
+transformers>=4.40
+torch>=2.2
+pandas>=2.0
+requests>=2.31
+
+# Pipeline (batch scrapers in pipeline/)
 beautifulsoup4
 lxml
 html5lib
