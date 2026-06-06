@@ -16,13 +16,17 @@ the exact data point that caused it.
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+from audit_references import map_audit_reference
+
 DATA_DIR = PROJECT_ROOT / "data"
 COMPANIES_FILE = DATA_DIR / "dax_companies.csv"
 STOCK_PRICES_FILE = DATA_DIR / "stock_prices.csv"
@@ -60,6 +64,10 @@ def add_signal(
     evidence: str,
 ) -> None:
     """Append one risk signal in the shared output format."""
+    audit_reference = map_audit_reference(
+        text=f"{signal_text} {evidence}",
+        risk_type=risk_type,
+    )
     signals.append(
         {
             "company_name": company_name,
@@ -68,6 +76,7 @@ def add_signal(
             "signal_text": signal_text,
             "evidence": evidence,
             "detected_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            **audit_reference,
         }
     )
 
@@ -205,6 +214,17 @@ def generate_risk_signals() -> pd.DataFrame:
             "signal_text",
             "evidence",
             "detected_at",
+            "audit_risk_category",
+            "financial_statement_level_risk",
+            "affected_accounts",
+            "affected_assertions",
+            "affected_departments",
+            "legal_reference",
+            "audit_standard_reference",
+            "legal_reference_explanation",
+            "audit_standard_explanation",
+            "reference_responsibility",
+            "suggested_audit_response",
         ],
     )
 
@@ -224,6 +244,17 @@ def generate_risk_signals() -> pd.DataFrame:
                 "signal_text",
                 "evidence",
                 "detected_at",
+                "audit_risk_category",
+                "financial_statement_level_risk",
+                "affected_accounts",
+                "affected_assertions",
+                "affected_departments",
+                "legal_reference",
+                "audit_standard_reference",
+                "legal_reference_explanation",
+                "audit_standard_explanation",
+                "reference_responsibility",
+                "suggested_audit_response",
             ]
         ]
 
