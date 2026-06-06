@@ -21,12 +21,13 @@ if "seen" not in st.session_state:
 
 
 st.sidebar.title("Controls")
-companies = st.sidebar.multiselect(
-    "Companies to watch",
+selected_company = st.sidebar.selectbox(
+    "Company to watch",
     options=list(config.DAX40.keys()),
-    default=["Siemens", "Volkswagen", "SAP", "Deutsche Bank", "Bayer"],
+    index=list(config.DAX40.keys()).index("SAP"),
 )
-refresh = st.sidebar.slider("Refresh interval (sec)", 5, 60, config.REFRESH_SECONDS, 5)
+companies = [selected_company]
+refresh = config.REFRESH_SECONDS
 news_start_date = st.sidebar.date_input(
     "Articles from",
     value=dt.date(2026, 5, 1),
@@ -41,7 +42,8 @@ stock_start_date = st.sidebar.date_input(
 )
 mode = "LIVE NewsAPI" if config.NEWSAPI_KEY else "Cached news/mock mode"
 st.sidebar.caption(f"News source: {mode}")
-st.sidebar.caption("Headlines are filtered to the selected companies.")
+st.sidebar.caption("Headlines are filtered to the selected company.")
+st.sidebar.caption("Dashboard refreshes once per hour.")
 st.sidebar.caption(f"Article window: {news_start_date} to {news_end_date}")
 st.sidebar.caption("Prices: yfinance (live)")
 

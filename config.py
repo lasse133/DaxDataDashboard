@@ -69,7 +69,7 @@ RISK_DRIVERS = {
 }
 
 # --- Streaming / refresh settings --------------------------------------------
-REFRESH_SECONDS = 15          # how often the dashboard polls for new data
+REFRESH_SECONDS = 3600        # dashboard refresh interval in seconds (1 hour)
 PRICE_START_DATE = "2026-01-01"  # first date shown in the stock price chart
 PRICE_LOOKBACK = "ytd"        # fallback yfinance period when no start date is set
 PRICE_INTERVAL = "1d"         # yfinance candle interval
