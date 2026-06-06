@@ -79,6 +79,16 @@ PRICE_INTERVAL = "1d"         # yfinance candle interval
 # Get a free key at https://newsapi.org and paste it here (or set env NEWSAPI_KEY)
 # to switch to real, live headlines.
 import os
+from pathlib import Path
+
+# Load .env file if present (it is gitignored — safe to store secrets there)
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        if _line.strip() and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", None)
 
 # Sentiment label that should trigger an auditor warning.
