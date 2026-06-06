@@ -11,76 +11,95 @@ STOCK_PRICES_FILE = PROJECT_ROOT / "data" / "stock_prices.csv"
 
 
 # =============================================================================
-# 1. STOCK PRICES  (live, no API key required, fallback to CSV if offline)
+# 1. STOCK PRICES  (live, no API key required, NO fallback to CSV)
 # =============================================================================
+
 def get_prices(tickers: Iterable[str], start_date=None):
-    import yfinance as yf
+    """Fetch live stock prices directly from Yahoo's hidden JSON API."""
+    import requests
+    import pandas as pd
+    from urllib.parse import quote
 
     out = {}
     tickers = list(tickers)
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
     price_start_date = start_date or config.PRICE_START_DATE
-    try:
-        data = yf.download(
-            tickers=tickers,
-            start=price_start_date,
-            period=None if price_start_date else config.PRICE_LOOKBACK,
-            interval=config.PRICE_INTERVAL,
-            group_by="ticker",
-            progress=False,
-            threads=True,
-        )
-    except Exception as e:  # noqa: BLE001
-        print(f"[get_prices] download failed: {e}")
-        return _get_cached_prices(tickers, start_date=price_start_date)
 
-    for t in tickers:
-        try:
-            df = data[t] if len(tickers) > 1 else data
-            closes = df["Close"].dropna()
-            if closes.empty:
-                continue
-            last = float(closes.iloc[-1])
-            first = float(closes.iloc[0])
-            pct = (last - first) / first * 100 if first else 0.0
-            out[t] = {"last": last, "pct_change": pct, "history": closes}
-        except Exception:  # noqa: BLE001
-            continue
-    return out or _get_cached_prices(tickers, start_date=price_start_date)
+    # 1. Dynamically calculate the date range
+    if price_start_date:
+        # Convert the Streamlit calendar date into a Unix timestamp (period1)
+        p1 = int(pd.to_datetime(price_start_date).timestamp())
+        # Set the end date to right now (period2)
+        p2 = int(pd.Timestamp.now().timestamp())
+        
+        api_params = {
+            "period1": p1,
+            "period2": p2,
+            "interval": "1d",
+            "includePrePost": "false",
+            "events": "history",
+        }
+    else:
+        # Fallback if no date is selected
+        api_params = {
+            "range": "1y",
+            "interval": "1d",
+            "includePrePost": "false",
+            "events": "history",
+        }
 
-
-def _get_cached_prices(tickers: Iterable[str], start_date=None):
-    if not STOCK_PRICES_FILE.exists():
-        return {}
-
-    import pandas as pd
-
-    try:
-        stock_prices = pd.read_csv(STOCK_PRICES_FILE)
-    except Exception:
-        return {}
-
-    stock_prices["date"] = pd.to_datetime(stock_prices["date"])
-    if start_date:
-        stock_prices = stock_prices[
-            stock_prices["date"] >= pd.to_datetime(start_date)
-        ]
-
-    out = {}
     for ticker in tickers:
-        company_prices = stock_prices[
-            stock_prices["yahoo_ticker"].eq(ticker)
-        ].sort_values("date")
-        if company_prices.empty:
-            continue
-        closes = company_prices.set_index("date")["close"].dropna()
-        if closes.empty:
-            continue
-        last = float(closes.iloc[-1])
-        first = float(closes.iloc[0])
-        pct = (last - first) / first * 100 if first else 0.0
-        out[ticker] = {"last": last, "pct_change": pct, "history": closes}
-    return out
+        try:
+            # 2. Hit the Yahoo Chart API
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(ticker)}"
+            
+            res = requests.get(url, params=api_params, headers=headers, timeout=5)
+            res.raise_for_status()
+            data = res.json()
 
+            # 3. Parse the JSON payload
+            result = data.get("chart", {}).get("result", [])
+            if not result:
+                continue
+
+            timestamps = result[0].get("timestamp", [])
+            quote_data = result[0].get("indicators", {}).get("quote", [{}])[0]
+            closes = quote_data.get("close", [])
+
+            if not timestamps or not closes:
+                continue
+
+            # 4. Convert to a Pandas DataFrame
+            history_df = pd.DataFrame({
+                "date": pd.to_datetime(timestamps, unit="s", utc=True),
+                "close": closes
+            }).dropna()
+
+            if history_df.empty:
+                continue
+
+            # 5. Format the output for the Streamlit UI
+            history_series = history_df.set_index("date")["close"]
+            
+            last = float(history_series.iloc[-1])
+            first = float(history_series.iloc[0])
+            pct = (last - first) / first * 100 if first else 0.0
+
+            out[ticker] = {
+                "last": last,
+                "pct_change": pct,
+                "history": history_series
+            }
+
+        except Exception as e:
+            print(f"[get_prices] Direct API fetch failed for {ticker}: {e}")
+            continue
+            
+    return out
 
 # =============================================================================
 # 2. NEWS STREAM (Strictly Live API Mode - No Mock Fallbacks)
@@ -115,7 +134,7 @@ def _newsapi_news(
 
     if start_date:
         if start_date < thirty_days_ago:
-            # Fixed: Changed to a local st.warning to stay inside fragment scope safely
+            # Safely clamp the date inside the fragment
             st.warning(f"⚠️ NewsAPI free tier limited to past 30 days. Clamped query to {thirty_days_ago}")
             safe_start = thirty_days_ago
         else:
