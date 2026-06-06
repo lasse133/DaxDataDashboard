@@ -70,8 +70,9 @@ RISK_DRIVERS = {
 
 # --- Streaming / refresh settings --------------------------------------------
 REFRESH_SECONDS = 15          # how often the dashboard polls for new data
-PRICE_LOOKBACK = "1d"         # yfinance period for the intraday chart
-PRICE_INTERVAL = "5m"         # yfinance candle interval
+PRICE_START_DATE = "2026-01-01"  # first date shown in the stock price chart
+PRICE_LOOKBACK = "ytd"        # fallback yfinance period when no start date is set
+PRICE_INTERVAL = "1d"         # yfinance candle interval
 
 # --- News source toggle -------------------------------------------------------
 # Leave NEWSAPI_KEY = None to run on the built-in mock stream (zero setup).
