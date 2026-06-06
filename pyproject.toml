@@ -1,0 +1,21 @@
+[project]
+name = "daxdata-dashboard"
+version = "0.1.0"
+description = "Streamlit dashboard for DAX40 market, news, sentiment, and audit-risk context."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4",
+    "html5lib",
+    "lxml",
+    "pandas>=2.0",
+    "requests>=2.31",
+    "streamlit>=1.33",
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "transformers>=4.40",
+    "yfinance>=0.2.40",
+]
+
+[tool.uv]
+package = false

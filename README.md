@@ -30,6 +30,15 @@ Each layer is one file:
 
 ## Quick start
 
+### With uv
+
+```bash
+uv sync
+uv run streamlit run app.py
+```
+
+### With pip
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
