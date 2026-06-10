@@ -5,3 +5,4 @@ primaryColor = "#e63946"
 [server]
 runOnSave = true
 headless = false
+folderWatchBlacklist = [".venv"]

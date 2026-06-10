@@ -1,100 +1,150 @@
 """
 nlp.py
 ------
-The "Process + Score" layer.
+The "Process + Score" layer with universal namespace injection for Python 3.14.
 
-  - analyze_sentiment(text)  -> FinBERT financial sentiment (positive/negative/neutral + confidence)
-  - extract_risk_drivers(text) -> ISA-315-style risk categories via the lexicon in config.py
-  - score_headline(item)     -> combines both into one enriched record the UI can render
-
-FinBERT (ProsusAI/finbert) is loaded once and cached. The first call downloads
-the model (~400 MB) from Hugging Face; afterwards it runs locally.
+  - analyze_sentiment(text)    -> FinBERT financial sentiment (positive/negative/neutral + confidence)
+  - extract_risk_drivers(text) -> Advanced Zero-Shot Classification via BART model (no fallbacks)
+  - score_headline(item)       -> combines both into one enriched record the UI can render
 """
 
 from __future__ import annotations
+import builtins
 from functools import lru_cache
+import os
+import traceback
+import torch
+builtins.torch = torch  # Force inject torch into global builtins to resolve library NameErrors
+
+import transformers
+from transformers import pipeline
+
+# Mute noisy Hugging Face internal deprecation warnings
+transformers.logging.set_verbosity_error()
 
 import config
 from audit_references import map_audit_reference
+from pathlib import Path
 
-POSITIVE_KEYWORDS = [
-    "beat",
-    "beats",
-    "growth",
-    "profit",
-    "raises",
-    "record",
-    "strong",
-    "upgrade",
-]
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        if _line.strip() and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+
+HF_TOKEN = os.getenv("HF_TOKEN", None)
+# =============================================================================
+# 1. MODEL INITIALIZATION AND CACHING
+# =============================================================================
+@lru_cache(maxsize=1)
+def _get_sentiment_model():
+    """FinBERT for Positive/Negative Sentiment Analysis."""
+    try:
+        return pipeline(
+            task="text-classification",
+            model="ProsusAI/finbert",
+            top_k=None,
+            local_files_only=True
+        )
+    except Exception:
+        return pipeline(
+            task="text-classification",
+            model="ProsusAI/finbert",
+            api_key=HF_TOKEN,
+            top_k=None
+        )
 
 
 @lru_cache(maxsize=1)
-def _get_pipeline():
-    """Load FinBERT once. Cached for the life of the process."""
-    from transformers import pipeline
-    return pipeline(
-        task="text-classification",
-        model="ProsusAI/finbert",
-        top_k=None,          # return scores for all three classes
-    )
+def _get_zeroshot_model():
+    """BART Large MNLI model for Contextual Zero-Shot Risk Tagging."""
+    try:
+        return pipeline(
+            task="zero-shot-classification",
+            model="facebook/bart-large-mnli",
+            api_key=HF_TOKEN,
+            local_files_only=True
+        )
+    except Exception:
+        return pipeline(
+            task="zero-shot-classification",
+            model="facebook/bart-large-mnli"
+        )
 
 
+# =============================================================================
+# 2. SENTIMENT ENGINE
+# =============================================================================
 def analyze_sentiment(text: str) -> dict:
     """
     Return {"label": "negative", "score": 0.91, "scores": {pos,neg,neu}}.
-    `score` is the confidence of the winning label.
+    If the model fails, prints the exact error trace to the terminal window.
     """
     try:
-        clf = _get_pipeline()
-        raw = clf(text[:512])            # FinBERT max input length
-        # `raw` is a list with one element (a list of {label, score} dicts)
+        clf = _get_sentiment_model()
+        raw = clf(text[:512])  # Enforcement of FinBERT token boundary sequence
         scores = {d["label"].lower(): float(d["score"]) for d in raw[0]}
-    except Exception:
-        scores = _fallback_sentiment_scores(text)
-
-    label = max(scores, key=scores.get)
-    return {"label": label, "score": scores[label], "scores": scores}
-
-
-def _fallback_sentiment_scores(text: str) -> dict[str, float]:
-    """Small backup classifier for demos when FinBERT cannot load."""
-    lowered = text.lower()
-    risk_keywords = {
-        keyword
-        for keywords in config.RISK_DRIVERS.values()
-        for keyword in keywords
-    }
-    negative_hits = sum(1 for keyword in risk_keywords if keyword in lowered)
-    positive_hits = sum(1 for keyword in POSITIVE_KEYWORDS if keyword in lowered)
-
-    if negative_hits > positive_hits:
-        return {"negative": 0.72, "neutral": 0.20, "positive": 0.08}
-    if positive_hits > negative_hits:
-        return {"positive": 0.70, "neutral": 0.22, "negative": 0.08}
-    return {"neutral": 0.62, "negative": 0.23, "positive": 0.15}
+        label = max(scores, key=scores.get)
+        return {"label": label, "score": scores[label], "scores": scores}
+    except Exception as e:
+        print(f"\n--- [CRITICAL INFRASTRUCTURE ERROR: FinBERT SENTIMENT RUNTIME] ---")
+        print(f"Error Type: {type(e).__name__}")
+        print(f"Error Message: {e}")
+        traceback.print_exc()
+        print(f"-----------------------------------------------------------------\n")
+        
+        return {
+            "label": "FinBERT Model Error",
+            "score": 0.0,
+            "scores": {"positive": 0.0, "negative": 0.0, "neutral": 0.0}
+        }
 
 
+# =============================================================================
+# 3. RISK CLASSIFICATION ENGINE
+# =============================================================================
 def extract_risk_drivers(text: str) -> list[str]:
-    """Keyword-match the headline against the ISA-315 risk lexicon."""
-    t = text.lower()
-    hits = [cat for cat, kws in config.RISK_DRIVERS.items()
-            if any(kw in t for kw in kws)]
-    return hits or ["Uncategorised"]
+    """
+    Use a zero-shot model to classify text into structural ISA-315 risk buckets.
+    If the model fails, prints the exact error trace to the terminal window.
+    """
+    try:
+        classifier = _get_zeroshot_model()
+        candidate_labels = list(config.RISK_DRIVERS.keys())
+
+        result = classifier(text[:512], candidate_labels, multi_label=True)
+
+        valid_risks = [
+            label
+            for label, score in zip(result["labels"], result["scores"])
+            if score > 0.50
+        ]
+        return valid_risks if valid_risks else ["Uncategorised"]
+    except Exception as e:
+        print(f"\n--- [CRITICAL INFRASTRUCTURE ERROR: BART ZERO-SHOT RUNTIME] ---")
+        print(f"Error Type: {type(e).__name__}")
+        print(f"Error Message: {e}")
+        traceback.print_exc()
+        print(f"---------------------------------------------------------------\n")
+        
+        return ["BART Model Error"]
 
 
+# =============================================================================
+# 4. PIPELINE AGGREGATOR
+# =============================================================================
 def score_headline(item: dict) -> dict:
-    """
-    Enrich one raw headline dict (from data_sources.poll_news) with NLP output.
-    Adds: sentiment label, confidence, risk drivers, and an is_warning flag.
-    """
+    """Enrich raw headline map structures with deep learning and compliance analytics."""
     sent = analyze_sentiment(item["headline"])
     drivers = extract_risk_drivers(item["headline"])
     audit_reference = map_audit_reference(item["headline"], drivers)
+    
     is_warning = (
         sent["label"] == config.RISK_LABEL
         and sent["score"] >= config.WARNING_THRESHOLD
     )
+    
     return {
         **item,
         "sentiment": sent["label"],

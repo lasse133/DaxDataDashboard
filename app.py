@@ -12,7 +12,7 @@ import data_sources
 import nlp
 
 
-st.set_page_config(page_title="DAX40 Data Dashboard", page_icon=":bar_chart:", layout="wide")
+st.set_page_config(page_title="DAX40 Data Dashboard", layout="wide")
 
 if "feed" not in st.session_state:
     st.session_state.feed = []
@@ -40,12 +40,13 @@ stock_start_date = st.sidebar.date_input(
     "Stock prices from",
     value=dt.date(2026, 1, 1),
 )
+
 mode = "LIVE NewsAPI" if config.NEWSAPI_KEY else "Cached news/mock mode"
 st.sidebar.caption(f"News source: {mode}")
 st.sidebar.caption("Headlines are filtered to the selected company.")
 st.sidebar.caption("Dashboard refreshes once per hour.")
 st.sidebar.caption(f"Article window: {news_start_date} to {news_end_date}")
-st.sidebar.caption("Prices: yfinance (live)")
+st.sidebar.caption("Prices: Direct Yahoo API (live)")
 
 selected_tickers = [config.DAX40[c] for c in companies]
 current_filter = (tuple(companies), news_start_date.isoformat(), news_end_date.isoformat())
@@ -58,7 +59,7 @@ if st.session_state.get("feed_filter") != current_filter:
 st.title("DAX40 Data Dashboard")
 st.caption(
     "Real-time screening of market and news data to surface ISA 315 risk signals. "
-    "FinBERT scores financial sentiment; rule mappings add audit categories, "
+    "FinBERT scores financial sentiment; a Zero-Shot classification model assigns audit categories, "
     "affected accounts, and legal/audit references for warning signals."
 )
 
@@ -94,8 +95,8 @@ def _render_article_implication(item: dict) -> None:
     )
     st.markdown(f"**Risk drivers:** {', '.join(item['risk_drivers'])}")
     st.caption(
-        "Risk drivers are assigned by matching headline keywords against the "
-        "ISA-315-style risk lexicon in config.py."
+        "Risk drivers are assigned contextually using a facebook/bart-large-mnli Zero-Shot Transformer "
+        "model to evaluate semantic linguistic definitions rather than relying on exact keyword lookups."
     )
     st.markdown(f"**Audit risk category:** {item['audit_risk_category']}")
     st.markdown(
@@ -244,8 +245,8 @@ def live_feed():
         st.caption(
             "* confidence = FinBERT certainty for the displayed sentiment label. "
             "risk_score = FinBERT negative-class probability, so values closer to "
-            "1.000 indicate stronger negative-risk wording. risk_drivers = matched "
-            "ISA-315-style categories from the project lexicon."
+            "1.000 indicate stronger negative-risk wording. risk_drivers = contextual "
+            "ISA-315-style categories evaluated by the Zero-Shot model."
         )
     else:
         st.info("Waiting for matching headlines to stream in...")
