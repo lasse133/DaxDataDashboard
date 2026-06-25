@@ -101,95 +101,104 @@ def get_prices(tickers: Iterable[str], start_date=None):
             
     return out
 
+import time
+import streamlit as st
+
 # =============================================================================
-# 2. NEWS STREAM (Strictly Live API Mode - No Mock Fallbacks)
+# 2. NEWS STREAM (Strictly Live GDELT API Mode)
 # =============================================================================
-def _newsapi_news(
+
+# Add Streamlit's data cache. It keeps the downloaded JSON in memory for 1 hour (3600 seconds)
+# so you don't re-ping GDELT every time you click a button in the UI.
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_gdelt_fetch(query: str, start_str: str | None, end_str: str | None, page_size: int):
+    """Internal cached helper to handle the HTTP requests and rate limiters."""
+    import requests
+    
+    url = "https://api.gdeltproject.org/api/v2/doc/doc"
+    params = {
+        "query": query,
+        "mode": "ArtList",
+        "format": "json",
+        "maxrecords": page_size,
+        "timespan": "1month"  # Default if no dates
+    }
+
+    if start_str:
+        params["startdatetime"] = start_str
+        if end_str:
+            params["enddatetime"] = end_str
+        params.pop("timespan", None)
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+    # Exponential Backoff: Try 3 times, waiting longer each time if we hit a 429 Rate Limit
+    for attempt in range(3):
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=10)
+            
+            # If we get a 429 Too Many Requests, wait and retry
+            if r.status_code == 429:
+                wait_time = (attempt + 1) * 3  # Waits 3s, then 6s, then 9s
+                time.sleep(wait_time)
+                continue
+                
+            r.raise_for_status()
+            return r.json().get("articles", [])
+            
+        except Exception as e:
+            if attempt == 2:  # If we fail on the last attempt, report it
+                st.error(f"GDELT API Fetch Failed after retries: {e}")
+                return []
+    return []
+
+
+def _gdelt_news(
     companies: Iterable[str] | None = None,
     start_date=None,
     end_date=None,
-    page_size: int = 20,
+    page_size: int = 10,  # Lowered default slightly to be gentler on the API
 ):
-    """Fetch live headlines from NewsAPI. No static or mock fallbacks."""
-    import requests
-    import datetime as dt
-    import streamlit as st
-
-    # 1. Map selected companies into an API search query
-    selected = list(companies) if companies else ["Siemens", "Volkswagen", "SAP"]
-    query = " OR ".join(selected)
-
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": query,
-        "language": "en",
-        "sortBy": "publishedAt",
-        "pageSize": page_size,
-        "apiKey": config.NEWSAPI_KEY,
-    }
-
-    # 2. NewsAPI Free Tier Enforcement
-    today = dt.date.today()
-    thirty_days_ago = today - dt.timedelta(days=30)
-
-    if start_date:
-        if start_date < thirty_days_ago:
-            # Safely clamp the date inside the fragment
-            st.warning(f"⚠️ NewsAPI free tier limited to past 30 days. Clamped query to {thirty_days_ago}")
-            safe_start = thirty_days_ago
-        else:
-            safe_start = start_date
-        params["from"] = safe_start.isoformat()
+    """Format inputs and parse results from the open-source GDELT v2 Doc API."""
+    import config
     
-    if end_date:
-        params["to"] = end_date.isoformat()
+    selected = list(companies) if companies else ["Siemens", "Volkswagen", "SAP"]
+    query = " OR ".join([f'"{c}"' for c in selected])
 
-    # 3. Direct Request
-    try:
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        articles = r.json().get("articles", [])
-    except requests.exceptions.HTTPError as http_err:
-        st.error(f"❌ NewsAPI HTTP Error: {http_err} - {r.text}")
-        return []
-    except Exception as e:
-        st.error(f"❌ Network connection to NewsAPI failed: {e}")
-        return []
+    start_str = f"{start_date.strftime('%Y%m%d')}000000" if start_date else None
+    end_str = f"{end_date.strftime('%Y%m%d')}235959" if end_date else None
+
+    # Call the cached and rate-limit-protected helper function
+    articles = _cached_gdelt_fetch(query, start_str, end_str, page_size)
 
     results = []
     for a in articles:
         title = a.get("title") or ""
-        
-        # Match company name appearing in the title to filter results
         company = next((name for name in config.DAX40 if name.split()[0].lower() in title.lower()), "")
         
         if selected and company not in selected:
-            continue
-            
+            company = selected[0] if len(selected) == 1 else "DAX 40"
+
         results.append({
-            "company": company or "DAX 40",
+            "company": company,
             "headline": title,
-            "published": a.get("publishedAt", ""),
-            "source": (a.get("source") or {}).get("name", "NewsAPI"),
+            "published": a.get("seendate", ""),
+            "source": a.get("source", "GDELT"),
             "source_url": a.get("url", ""),
         })
     return results
 
 
 def poll_news(
-    n: int = 2,
+    n: int = 5,
     companies: Iterable[str] | None = None,
     start_date=None,
     end_date=None,
 ):
-    """Single entry point for the UI. Exclusively handles live API polling."""
-    import streamlit as st
-
-    if not config.NEWSAPI_KEY:
-        st.error("❌ Critical Configuration Error: NEWSAPI_KEY is missing from your .env file.")
-        return []
-        
-    return _newsapi_news(
+    """Single entry point for the UI. Exclusively handles live GDELT API polling."""
+    return _gdelt_news(
         companies=companies,
         start_date=start_date,
         end_date=end_date,

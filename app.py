@@ -10,15 +10,12 @@ import streamlit as st
 import config
 import data_sources
 import nlp
+import database
 
+# Initialize the database and table schema on startup
+database.init_db()
 
 st.set_page_config(page_title="DAX40 Data Dashboard", layout="wide")
-
-if "feed" not in st.session_state:
-    st.session_state.feed = []
-if "seen" not in st.session_state:
-    st.session_state.seen = set()
-
 
 st.sidebar.title("Controls")
 selected_company = st.sidebar.selectbox(
@@ -28,33 +25,28 @@ selected_company = st.sidebar.selectbox(
 )
 companies = [selected_company]
 refresh = config.REFRESH_SECONDS
+
+# GDELT has deep history, allowing unrestricted date selection
 news_start_date = st.sidebar.date_input(
     "Articles from",
-    value=dt.date(2026, 5, 1),
+    value=dt.date.today() - dt.timedelta(days=30),
 )
 news_end_date = st.sidebar.date_input(
     "Articles until",
-    value=dt.date(2026, 6, 6),
+    value=dt.date.today(),
 )
 stock_start_date = st.sidebar.date_input(
     "Stock prices from",
-    value=dt.date(2026, 1, 1),
+    value=dt.date.today() - dt.timedelta(days=90),
 )
 
-mode = "LIVE NewsAPI" if config.NEWSAPI_KEY else "Cached news/mock mode"
-st.sidebar.caption(f"News source: {mode}")
+st.sidebar.caption("News source: Live GDELT API Mode")
 st.sidebar.caption("Headlines are filtered to the selected company.")
 st.sidebar.caption("Dashboard refreshes once per hour.")
 st.sidebar.caption(f"Article window: {news_start_date} to {news_end_date}")
 st.sidebar.caption("Prices: Direct Yahoo API (live)")
 
 selected_tickers = [config.DAX40[c] for c in companies]
-current_filter = (tuple(companies), news_start_date.isoformat(), news_end_date.isoformat())
-if st.session_state.get("feed_filter") != current_filter:
-    st.session_state.feed = []
-    st.session_state.seen = set()
-    st.session_state.feed_filter = current_filter
-
 
 st.title("DAX40 Data Dashboard")
 st.caption(
@@ -132,34 +124,32 @@ def live_feed():
         return
 
     st.caption(
-        "News selection: the app polls cached scraped news or NewsAPI for the "
+        "News selection: the app polls the live GDELT API for the "
         "companies and article date range selected in the sidebar, then deduplicates "
         "by company and headline."
     )
 
     incoming = data_sources.poll_news(
-        n=3,
+        n=5,
         companies=companies,
         start_date=news_start_date,
         end_date=news_end_date,
     )
 
+    # Database Gatekeeper: Only score new articles
     for item in incoming:
-        key = (item["company"], item["headline"])
-        if key in st.session_state.seen:
+        if database.headline_exists(item["company"], item["headline"]):
             continue
-        st.session_state.seen.add(key)
+            
         try:
             scored = nlp.score_headline(item)
-        except Exception as e:  # noqa: BLE001
+            database.save_headline(scored)
+        except Exception as e:
             st.warning(f"NLP scoring failed: {e}")
             continue
-        st.session_state.feed.insert(0, scored)
 
-    feed = [
-        item for item in st.session_state.feed
-        if item["company"] in companies
-    ][:50]
+    # Fetch the history directly from SQLite
+    feed = database.get_recent_headlines(companies=companies, limit=50)
 
     warnings = [item for item in feed[:8] if item["is_warning"]]
     if warnings:
