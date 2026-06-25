@@ -1,30 +1,84 @@
 # DAX 40 Audit Risk Radar
 
-Real-time screening of market and news data to detect risk signals, summarize
-key developments, and support structured audit risk assessment (ISA 315).
+Real-time screening of market and news data to detect risk signals, summarize key
+developments, and support structured audit risk assessment (ISA 315).
+
+> **Streaming-first:** every value shown in the dashboard is fetched **live from an
+> API at request time**. No scraped CSV is read at runtime — the project focuses on
+> data streaming, not batch files. (The `data/` folder only holds a SQLite cache of
+> already-scored headlines.)
 
 ---
 
-## Data flow (streaming)
+## Data flow
 
 ```
-     INGEST              PROCESS              SCORE               VISUALIZE
-┌──────────────┐   ┌─────────────┐   ┌──────────────────┐   ┌──────────────┐
-│ News headline│──▶│ Send text   │──▶│ FinBERT sentiment│──▶│ Streamlit    │
-│ + stock tick │   │ to FinBERT  │   │ + risk category  │   │ flashes      │
-│ (data_sources│   │ (nlp.py)    │   │ (nlp.py)         │   │ warning +    │
-│  .py)        │   │             │   │                  │   │ price chart  │
-└──────────────┘   └─────────────┘   └──────────────────┘   └──────────────┘
+     INGEST                  PROCESS              SCORE                  VISUALIZE
+┌──────────────────┐   ┌─────────────┐   ┌────────────────────┐   ┌──────────────┐
+│ GDELT headline   │──▶│ Send title  │──▶│ FinBERT sentiment  │──▶│ Streamlit:   │
+│ + Yahoo price    │   │ to the NLP  │   │ + BART zero-shot   │   │ warning rows,│
+│ tick             │   │ models      │   │ risk drivers       │   │ metrics,     │
+│ (data_sources.py)│   │ (nlp.py)    │   │ + audit references │   │ price chart  │
+└──────────────────┘   └─────────────┘   └────────────────────┘   └──────────────┘
+                                                  │
+                                       scored records cached in
+                                       SQLite (database.py)
 ```
 
-Each layer is one file:
+## Data sources (all live APIs)
 
-| File | Layer | Responsibility |
-|------|-------|----------------|
-| `config.py` | — | Companies, tickers, risk keyword lexicon, settings |
-| `data_sources.py` | Ingest | Live prices (yfinance) + news stream (mock or NewsAPI) |
-| `nlp.py` | Process + Score | FinBERT sentiment + ISA-315 risk-driver extraction |
-| `app.py` | Visualize | Streamlit dashboard + auto-refreshing streaming fragments |
+| Data | Source | Key? | Notes |
+|------|--------|------|-------|
+| News | **GDELT DOC 2.0** | no | Deep history, English-filtered. Rate-limited (1 req / 5 s), so fetches are throttled/cached. |
+| Stock prices | **Yahoo Finance chart API** | no | Direct JSON endpoint. |
+
+News is filtered to **English** and to the **selected company**. No API key is required.
+
+> Looking for a NewsAPI + GDELT hybrid (NewsAPI for the last 30 days, GDELT for older
+> history)? That variant lives on the **`hybrid`** branch.
+
+---
+
+## Architecture
+
+```
+.
+├── app.py              # Streamlit dashboard: UI, manual fetch, scoring orchestration
+├── config.py           # DAX 40 companies/tickers, risk labels, settings
+├── data_sources.py     # Streaming ingest: GDELT news + Yahoo prices
+├── nlp.py              # FinBERT sentiment + BART zero-shot risk-driver extraction
+├── audit_references.py # Maps risk drivers -> ISA-315 audit / legal references
+├── database.py         # SQLite cache of scored headlines (data/audit_radar.db)
+├── .streamlit/config.toml
+├── requirements.txt / pyproject.toml / uv.lock
+├── data/
+│   └── audit_radar.db  # runtime SQLite cache (NOT scraped data)
+└── pipeline/           # OPTIONAL legacy batch scrapers — NOT used by the dashboard
+```
+
+> `pipeline/` and the CSVs it produces (`data/company_news.csv`, `dax_companies.csv`,
+> etc.) are leftovers from an earlier batch design. The streaming dashboard does **not**
+> read them; they can be ignored or deleted.
+
+---
+
+## How it works
+
+- **Manual fetch.** News is fetched **on demand** when you click **🔄 Fetch latest
+  news** — the feed otherwise just displays what is already scored in the cache.
+- **Scoring.** Each *new* headline is run through **FinBERT** (`ProsusAI/finbert`) for
+  financial sentiment and **BART zero-shot** (`facebook/bart-large-mnli`) for ISA-315
+  risk categories, then enriched with audit/legal references.
+- **Investigation flags.** A negative headline above the confidence threshold is flagged:
+  its table row is tinted red and its implications headline is shown in red.
+
+### Caching (two layers)
+
+1. **API responses** — `@st.cache_data(ttl=3600)` keeps each GDELT response for **1 hour**,
+   so repeat clicks for the same company/window don't re-hit the API (and stay under
+   GDELT's rate limit).
+2. **Scored headlines** — persisted **permanently** in SQLite (`data/audit_radar.db`)
+   with a `UNIQUE(company, headline)` constraint, so a headline is only scored once.
 
 ---
 
@@ -46,84 +100,18 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-A browser tab opens at `http://localhost:8501`. The **first run downloads
-FinBERT (~400 MB)** from Hugging Face; afterwards it starts instantly.
-Works out of the box on a **mock news stream** — no API keys required.
+The dashboard opens at **http://localhost:8501**. No API keys are required (GDELT and
+the Yahoo price API are both keyless). The first scoring run loads FinBERT (~400 MB) and
+BART (~1.6 GB) from the Hugging Face cache.
 
-### Switch to live news (optional)
-
-Get a free key at <https://newsapi.org>, then:
-
-```bash
-export NEWSAPI_KEY="your-key-here"
-streamlit run app.py
-```
+> **`accelerate` is required.** transformers 5.x loads model weights on the `meta` device
+> and needs `accelerate` to move them to CPU — without it you get
+> `NotImplementedError: Cannot copy out of meta tensor`. It is included in `pyproject.toml`
+> (so `uv sync` installs it); pip users should run `pip install accelerate` as well.
 
 ---
 
-## File map
+## Disclaimer
 
-```
-.
-├── app.py              # Streamlit dashboard + streaming fragments (Visualize)
-├── config.py           # DAX40 companies, tickers, risk lexicon, settings
-├── data_sources.py     # Ingest: yfinance prices + news stream
-├── nlp.py              # FinBERT sentiment + risk extraction (Process + Score)
-├── requirements.txt    # All dependencies
-├── .streamlit/
-│   └── config.toml     # Dark theme + dev settings
-├── pipeline/           # Batch scrapers (run once to seed data/ CSVs)
-│   ├── scrape_dax_companies.py
-│   ├── scrape_stock_prices.py
-│   ├── scrape_company_news.py
-│   ├── scrape_google_search.py
-│   └── generate_risk_signals.py
-└── data/               # CSV outputs from batch pipeline
-    ├── dax_companies.csv
-    ├── yahoo_ticker_mapping.csv
-    ├── stock_prices.csv
-    ├── company_news.csv
-    └── risk_signals.csv
-```
-
----
-
-## Batch pipeline (optional)
-
-The `pipeline/` scripts scrape and cache static CSVs. They are not required to
-run the dashboard but are useful for offline analysis or to seed historical data.
-
-```bash
-python pipeline/scrape_dax_companies.py
-python pipeline/scrape_stock_prices.py
-python pipeline/scrape_company_news.py
-python pipeline/scrape_google_search.py   # requires GOOGLE_API_KEY + GOOGLE_CSE_ID
-python pipeline/generate_risk_signals.py
-```
-
----
-
-## Testing each layer
-
-```bash
-# FinBERT sentiment
-python -c "import nlp; print(nlp.analyze_sentiment('Siemens faces project delays and a profit warning'))"
-
-# Risk-driver extraction
-python -c "import nlp; print(nlp.extract_risk_drivers('lawsuit and supply chain disruption'))"
-
-# Live prices
-python -c "import data_sources; print(data_sources.get_prices(['SAP.DE']))"
-
-# Full enriched record
-python -c "import nlp, data_sources; print(nlp.score_headline(data_sources.poll_news(1)[0]))"
-```
-
----
-
-## Suggested next steps
-
-1. **Persist an audit trail** — append scored headlines to `events.csv` or SQLite for documented, timestamped evidence.
-2. **Correlate news with price** — flag when a negative headline lands within N minutes of a >X% drop; that co-occurrence is the strongest signal.
-3. **Per-company risk gauge** — aggregate recent negative confidence into a 0–100 score per DAX name for the planning summary.
-4. **Deploy** — push to GitHub and connect to [Streamlit Community Cloud](https://share.streamlit.io); add `NEWSAPI_KEY` under *Settings → Secrets*.
+Decision-support tool for audit planning (ISA 315). Sentiment and risk categories are
+model-generated and must be reviewed by the engagement team.
