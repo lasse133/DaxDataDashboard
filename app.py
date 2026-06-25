@@ -60,7 +60,19 @@ def _article_label(item: dict, index: int) -> str:
     headline = item["headline"]
     if len(headline) > 90:
         headline = f"{headline[:87]}..."
-    return f"{index}. {item['company']} - {headline}"
+    label = f"{index}. {item['company']} - {headline}"
+    if item.get("is_warning"):
+        # Make headlines that need investigation stand out in the implications list.
+        return f":red[⚠️ {label}]"
+    return label
+
+
+def _highlight_investigation_rows(row):
+    """Tint table rows that need investigation (implication == 'Investigate')
+    with a warning colour: light-red fill, bold dark-red text."""
+    if row.get("implication") == "Investigate":
+        return ["background-color: #ffd5d5; color: #b00020; font-weight: 600"] * len(row)
+    return [""] * len(row)
 
 
 def _investigation_summary(item: dict) -> str:
@@ -114,41 +126,57 @@ def _render_article_implication(item: dict) -> None:
     st.markdown(f"**Implication:** {_investigation_summary(item)}")
 
 
-@st.fragment(run_every=refresh)
-def live_feed():
-    if not companies:
-        st.info("Pick at least one company in the sidebar to stream audit news.")
-        return
+def _scoring_failed(scored: dict) -> bool:
+    """True if the NLP models errored out, so we don't cache a broken record."""
+    drivers = scored.get("risk_drivers") or []
+    return (
+        "BART Model Error" in drivers
+        or "FinBERT Model Error" in str(scored.get("sentiment", ""))
+    )
+
+
+def fetch_and_score_news():
+    """Manual fetch: poll GDELT, score only new headlines, persist to SQLite.
+    Triggered by the button (no automatic timer)."""
     if news_start_date > news_end_date:
         st.warning("Article start date must be before or equal to the end date.")
         return
 
-    st.caption(
-        "News selection: the app polls the live GDELT API for the "
-        "companies and article date range selected in the sidebar, then deduplicates "
-        "by company and headline."
-    )
+    with st.spinner(f"Fetching and scoring news for {companies[0]}…"):
+        incoming = data_sources.poll_news(
+            n=5,
+            companies=companies,
+            start_date=news_start_date,
+            end_date=news_end_date,
+        )
 
-    incoming = data_sources.poll_news(
-        n=5,
-        companies=companies,
-        start_date=news_start_date,
-        end_date=news_end_date,
-    )
+        new_count = 0
+        for item in incoming:
+            if database.headline_exists(item["company"], item["headline"]):
+                continue
+            try:
+                scored = nlp.score_headline(item)
+                if _scoring_failed(scored):
+                    st.warning(
+                        "NLP model error while scoring a headline — skipped "
+                        "(not cached). Check the terminal for the traceback."
+                    )
+                    continue
+                database.save_headline(scored)
+                new_count += 1
+            except Exception as e:  # noqa: BLE001
+                st.warning(f"NLP scoring failed: {e}")
+                continue
 
-    # Database Gatekeeper: Only score new articles
-    for item in incoming:
-        if database.headline_exists(item["company"], item["headline"]):
-            continue
-            
-        try:
-            scored = nlp.score_headline(item)
-            database.save_headline(scored)
-        except Exception as e:
-            st.warning(f"NLP scoring failed: {e}")
-            continue
+    st.success(f"Fetched {len(incoming)} headline(s); {new_count} new and scored.")
 
-    # Fetch the history directly from SQLite
+
+def live_feed():
+    if not companies:
+        st.info("Pick at least one company in the sidebar to stream audit news.")
+        return
+
+    # Read the scored history straight from SQLite (no fetching here).
     feed = database.get_recent_headlines(companies=companies, limit=50)
 
     warnings = [item for item in feed[:8] if item["is_warning"]]
@@ -201,7 +229,7 @@ def live_feed():
             }
         )
         st.dataframe(
-            df,
+            df.style.apply(_highlight_investigation_rows, axis=1),
             width="stretch",
             hide_index=True,
             column_config={
@@ -239,13 +267,13 @@ def live_feed():
             "ISA-315-style categories evaluated by the Zero-Shot model."
         )
     else:
-        st.info("Waiting for matching headlines to stream in...")
+        st.info("No scored headlines yet. Click '🔄 Fetch latest news' to pull and score articles.")
 
     st.markdown('<a id="article-implications"></a>', unsafe_allow_html=True)
     st.subheader("Article Implications")
     if feed:
         for index, item in enumerate(feed, start=1):
-            with st.expander(_article_label(item, index), expanded=index == 1):
+            with st.expander(_article_label(item, index), expanded=False):
                 _render_article_implication(item)
     else:
         st.info(
@@ -253,13 +281,41 @@ def live_feed():
         )
 
 
+# --- manual news fetch control (no automatic timer) --------------------------
+st.caption(
+    "News is fetched on demand. Click the button to poll the live GDELT API for the "
+    "selected company and article window; new headlines are scored and cached."
+)
+st.markdown(
+    """
+    <style>
+    div.stButton > button {
+        background-color: #e0e0e0;
+        color: #333333;
+        border: 1px solid #c4c4c4;
+    }
+    div.stButton > button:hover {
+        background-color: #d5d5d5;
+        color: #000000;
+        border-color: #a8a8a8;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+if st.button(
+    "🔄 Fetch latest news",
+    type="secondary",
+    help="Poll GDELT live and score new headlines for the selected company.",
+):
+    fetch_and_score_news()
+
 live_feed()
 
 
 st.subheader(f"Stock prices from {stock_start_date}")
 
 
-@st.fragment(run_every=refresh)
 def price_panel():
     if not selected_tickers:
         st.info("Pick at least one company in the sidebar.")

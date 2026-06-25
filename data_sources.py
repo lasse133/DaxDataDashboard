@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -139,20 +140,55 @@ def _cached_gdelt_fetch(query: str, start_str: str | None, end_str: str | None, 
         try:
             r = requests.get(url, params=params, headers=headers, timeout=10)
             
-            # If we get a 429 Too Many Requests, wait and retry
+            # If we get a 429 Too Many Requests, wait and retry. GDELT requires
+            # AT LEAST 5 seconds between requests, so the first wait must clear
+            # that floor (the old 3s wait was always re-throttled).
             if r.status_code == 429:
-                wait_time = (attempt + 1) * 3  # Waits 3s, then 6s, then 9s
+                wait_time = 6 + attempt * 3  # 6s, 9s, 12s
                 time.sleep(wait_time)
                 continue
                 
             r.raise_for_status()
+
+            # GDELT sometimes returns HTTP 200 with an EMPTY body or a plain-text
+            # notice (e.g. rate-limit / "query too short") instead of JSON. Calling
+            # .json() on that raises "Expecting value: line 1 column 1 (char 0)".
+            text = r.text.strip()
+            if not text or text[0] not in "[{":
+                if attempt < 2:
+                    time.sleep((attempt + 1) * 2)
+                    continue
+                st.info(
+                    "GDELT returned no parseable results — it is often rate-limiting "
+                    "or has no articles for this query/date window. Try again shortly."
+                )
+                return []
+
             return r.json().get("articles", [])
-            
+
         except Exception as e:
             if attempt == 2:  # If we fail on the last attempt, report it
                 st.error(f"GDELT API Fetch Failed after retries: {e}")
                 return []
     return []
+
+
+# Non-Latin scripts (CJK, Cyrillic, Hebrew, Arabic, Thai) used as a fallback
+# English check when GDELT does not tag an article's language.
+_NON_LATIN = re.compile(
+    "[぀-ヿ㐀-鿿가-힯"   # Japanese kana, CJK, Hangul
+    "Ѐ-ӿ֐-׿؀-ۿ"      # Cyrillic, Hebrew, Arabic
+    "฀-๿]"                               # Thai
+)
+
+
+def _is_english_article(article: dict, title: str) -> bool:
+    """English-only filter: trust GDELT's per-article language tag; if it is
+    missing, fall back to checking the title for non-Latin script."""
+    lang = (article.get("language") or "").strip().lower()
+    if lang:
+        return lang in ("english", "eng", "en")
+    return bool(title) and not _NON_LATIN.search(title)
 
 
 def _gdelt_news(
@@ -176,6 +212,11 @@ def _gdelt_news(
     results = []
     for a in articles:
         title = a.get("title") or ""
+
+        # English-only: drop articles GDELT tags as another language.
+        if not _is_english_article(a, title):
+            continue
+
         company = next((name for name in config.DAX40 if name.split()[0].lower() in title.lower()), "")
         
         if selected and company not in selected:
