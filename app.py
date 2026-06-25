@@ -26,7 +26,7 @@ selected_company = st.sidebar.selectbox(
 companies = [selected_company]
 refresh = config.REFRESH_SECONDS
 
-# GDELT has deep history, allowing unrestricted date selection
+# NewsAPI covers the last 30 days; GDELT backfills older dates (deep history).
 news_start_date = st.sidebar.date_input(
     "Articles from",
     value=dt.date.today() - dt.timedelta(days=30),
@@ -40,11 +40,20 @@ stock_start_date = st.sidebar.date_input(
     value=dt.date.today() - dt.timedelta(days=90),
 )
 
-st.sidebar.caption("News source: Live GDELT API Mode")
+st.sidebar.caption("News source: NewsAPI (last 30 days) + GDELT (older history)")
 st.sidebar.caption("Headlines are filtered to the selected company.")
-st.sidebar.caption("Dashboard refreshes once per hour.")
+st.sidebar.caption("News is fetched on demand — click 'Fetch latest news'.")
 st.sidebar.caption(f"Article window: {news_start_date} to {news_end_date}")
 st.sidebar.caption("Prices: Direct Yahoo API (live)")
+
+if st.sidebar.button(
+    "🗑️ Clear cached news",
+    help="Delete all stored headlines and the 1-hour API response cache, then reload.",
+):
+    deleted = database.clear_headlines()
+    st.cache_data.clear()
+    st.toast(f"Cleared {deleted} cached headline(s).")
+    st.rerun()
 
 selected_tickers = [config.DAX40[c] for c in companies]
 
@@ -136,8 +145,8 @@ def _scoring_failed(scored: dict) -> bool:
 
 
 def fetch_and_score_news():
-    """Manual fetch: poll GDELT, score only new headlines, persist to SQLite.
-    Triggered by the button (no automatic timer)."""
+    """Manual fetch: poll the news sources, score only new headlines, persist to
+    SQLite. Triggered by the button (no automatic timer)."""
     if news_start_date > news_end_date:
         st.warning("Article start date must be before or equal to the end date.")
         return
@@ -283,8 +292,8 @@ def live_feed():
 
 # --- manual news fetch control (no automatic timer) --------------------------
 st.caption(
-    "News is fetched on demand. Click the button to poll the live GDELT API for the "
-    "selected company and article window; new headlines are scored and cached."
+    "News is fetched on demand. Click the button to poll NewsAPI (last 30 days) plus "
+    "GDELT (older dates) for the selected company and window; new headlines are scored and cached."
 )
 st.markdown(
     """
@@ -306,7 +315,7 @@ st.markdown(
 if st.button(
     "🔄 Fetch latest news",
     type="secondary",
-    help="Poll GDELT live and score new headlines for the selected company.",
+    help="Fetch live news (NewsAPI + GDELT) and score new headlines for the selected company.",
 ):
     fetch_and_score_news()
 

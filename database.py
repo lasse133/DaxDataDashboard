@@ -83,6 +83,21 @@ def save_headline(item: dict):
             item.get("reference_responsibility"), item.get("suggested_audit_response")
         ))
 
+def clear_headlines(companies: list[str] | None = None) -> int:
+    """Delete scored headlines from the cache. If `companies` is given, only those
+    are removed; otherwise the whole table is wiped. Returns rows deleted."""
+    with get_connection() as conn:
+        if companies:
+            placeholders = ",".join("?" * len(companies))
+            cursor = conn.execute(
+                f"DELETE FROM headlines WHERE company IN ({placeholders})",
+                tuple(companies),
+            )
+        else:
+            cursor = conn.execute("DELETE FROM headlines")
+        return cursor.rowcount
+
+
 def get_recent_headlines(companies: list[str], limit: int = 50) -> list[dict]:
     """Retrieve the most recent scored headlines from the database for the UI."""
     if not companies:
