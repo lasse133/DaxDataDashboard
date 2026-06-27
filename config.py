@@ -9,7 +9,7 @@ which words signal risk) lives here so the rest of the code stays generic.
 
 # --- DAX 40 constituents: display name -> Yahoo Finance ticker ----------------
 # Yahoo uses the ".DE" suffix for Frankfurt-listed shares.
-# (List is the DAX 40 as of 2025/2026; adjust if the index reshuffles.)
+# Current DAX 40 constituents as of the June 2026 rebalance.
 DAX40 = {
     "Adidas": "ADS.DE",
     "Airbus": "AIR.DE",
@@ -28,21 +28,22 @@ DAX40 = {
     "Deutsche Telekom": "DTE.DE",
     "E.ON": "EOAN.DE",
     "Fresenius": "FRE.DE",
+    "Fresenius Medical Care": "FME.DE",
+    "GEA": "G1A.DE",
     "Hannover Rueck": "HNR1.DE",
     "Heidelberg Materials": "HEI.DE",
     "Henkel": "HEN3.DE",
+    "Hochtief": "HOT.DE",
     "Infineon": "IFX.DE",
     "Mercedes-Benz": "MBG.DE",
     "Merck": "MRK.DE",
     "MTU Aero Engines": "MTX.DE",
     "Munich Re": "MUV2.DE",
-    "Porsche AG": "P911.DE",
-    "Porsche SE": "PAH3.DE",
     "Qiagen": "QIA.DE",
     "Rheinmetall": "RHM.DE",
     "RWE": "RWE.DE",
     "SAP": "SAP.DE",
-    "Sartorius": "SRT3.DE",
+    "Scout24": "G24.DE",
     "Siemens": "SIE.DE",
     "Siemens Energy": "ENR.DE",
     "Siemens Healthineers": "SHL.DE",

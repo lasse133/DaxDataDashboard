@@ -25,9 +25,14 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 company TEXT,
                 headline TEXT,
+                original_headline TEXT,
+                original_language TEXT,
                 published TEXT,
                 source TEXT,
                 source_url TEXT,
+                ticker TEXT,
+                sector TEXT,
+                query TEXT,
                 sentiment TEXT,
                 confidence REAL,
                 risk_score REAL,
@@ -47,6 +52,19 @@ def init_db():
                 UNIQUE(company, headline) 
             )
         """)
+        existing = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(headlines)").fetchall()
+        }
+        for column, column_type in {
+            "original_headline": "TEXT",
+            "original_language": "TEXT",
+            "ticker": "TEXT",
+            "sector": "TEXT",
+            "query": "TEXT",
+        }.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE headlines ADD COLUMN {column} {column_type}")
         # The UNIQUE constraint ensures we never save duplicate headlines
 
 def headline_exists(company: str, headline: str) -> bool:
@@ -63,16 +81,19 @@ def save_headline(item: dict):
     with get_connection() as conn:
         conn.execute("""
             INSERT OR IGNORE INTO headlines (
-                company, headline, published, source, source_url,
+                company, headline, original_headline, original_language,
+                published, source, source_url, ticker, sector, query,
                 sentiment, confidence, risk_score, risk_drivers, is_warning,
                 audit_risk_category, financial_statement_level_risk, affected_accounts,
                 affected_assertions, affected_departments, legal_reference,
                 audit_standard_reference, legal_reference_explanation,
                 audit_standard_explanation, reference_responsibility, suggested_audit_response
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            item.get("company"), item.get("headline"), item.get("published"),
-            item.get("source"), item.get("source_url"), item.get("sentiment"),
+            item.get("company"), item.get("headline"), item.get("original_headline"),
+            item.get("original_language"), item.get("published"),
+            item.get("source"), item.get("source_url"), item.get("ticker"),
+            item.get("sector"), item.get("query"), item.get("sentiment"),
             item.get("confidence"), item.get("risk_score"),
             json.dumps(item.get("risk_drivers", [])),  # Convert Python list to JSON string for SQL
             item.get("is_warning"), item.get("audit_risk_category"),

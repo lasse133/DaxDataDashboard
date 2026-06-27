@@ -26,24 +26,43 @@ selected_company = st.sidebar.selectbox(
 companies = [selected_company]
 refresh = config.REFRESH_SECONDS
 
-# NewsAPI covers the last 30 days; GDELT backfills older dates (deep history).
-news_start_date = st.sidebar.date_input(
-    "Articles from",
-    value=dt.date.today() - dt.timedelta(days=30),
-)
-news_end_date = st.sidebar.date_input(
-    "Articles until",
-    value=dt.date.today(),
-)
-stock_start_date = st.sidebar.date_input(
-    "Stock prices from",
-    value=dt.date.today() - dt.timedelta(days=90),
-)
+def _quarter_window(year: int, quarters: list[str]) -> tuple[dt.date, dt.date]:
+    quarter_ranges = {
+        "Q1": (dt.date(year, 1, 1), dt.date(year, 3, 31)),
+        "Q2": (dt.date(year, 4, 1), dt.date(year, 6, 30)),
+        "Q3": (dt.date(year, 7, 1), dt.date(year, 9, 30)),
+        "Q4": (dt.date(year, 10, 1), dt.date(year, 12, 31)),
+    }
+    ranges = [quarter_ranges[q] for q in quarters]
+    return min(r[0] for r in ranges), min(max(r[1] for r in ranges), dt.date.today())
 
-st.sidebar.caption("News source: NewsAPI (last 30 days) + GDELT (older history)")
-st.sidebar.caption("Headlines are filtered to the selected company.")
+
+available_years = list(range(2025, dt.date.today().year + 1))
+period_year = st.sidebar.selectbox(
+    "Reporting year",
+    options=available_years,
+    index=available_years.index(2025),
+)
+selected_quarters = st.sidebar.multiselect(
+    "Reporting period",
+    options=["Q1", "Q2", "Q3", "Q4"],
+    default=["Q1", "Q2", "Q3", "Q4"],
+    help="Select one or more quarters. Selecting Q1-Q4 gives the full year.",
+)
+if not selected_quarters:
+    st.sidebar.warning("Select at least one quarter.")
+    selected_quarters = ["Q1", "Q2", "Q3", "Q4"]
+
+news_start_date, news_end_date = _quarter_window(period_year, selected_quarters)
+stock_start_date = news_start_date
+
+st.sidebar.caption("News source: NewsAPI recent + Google News RSS history")
+st.sidebar.caption("Headlines are filtered to the selected company in English or German.")
 st.sidebar.caption("News is fetched on demand — click 'Fetch latest news'.")
-st.sidebar.caption(f"Article window: {news_start_date} to {news_end_date}")
+st.sidebar.caption(
+    f"Selected period: {', '.join(selected_quarters)} {period_year} "
+    f"({news_start_date} to {news_end_date})"
+)
 st.sidebar.caption("Prices: Direct Yahoo API (live)")
 
 if st.sidebar.button(
@@ -88,6 +107,22 @@ def _investigation_summary(item: dict) -> str:
     if item["is_warning"]:
         return item["suggested_audit_response"]
     return "No further investigation necessary based on this signal alone."
+
+
+def _filter_feed_by_period(feed: list[dict]) -> list[dict]:
+    """Keep cached headlines inside the selected reporting period."""
+    start = pd.Timestamp(news_start_date).tz_localize(None)
+    end = pd.Timestamp(news_end_date).tz_localize(None) + pd.Timedelta(days=1)
+    filtered = []
+    for item in feed:
+        published = pd.to_datetime(item.get("published"), errors="coerce", utc=True)
+        if pd.isna(published):
+            filtered.append(item)
+            continue
+        published = published.tz_convert(None)
+        if start <= published < end:
+            filtered.append(item)
+    return filtered
 
 
 def _render_article_implication(item: dict) -> None:
@@ -144,6 +179,31 @@ def _scoring_failed(scored: dict) -> bool:
     )
 
 
+def _not_scored_language_record(item: dict) -> dict:
+    return {
+        **item,
+        "sentiment": "not scored due to language",
+        "confidence": 0.0,
+        "risk_score": 0.0,
+        "risk_drivers": ["Not scored due to language"],
+        "is_warning": False,
+        "audit_risk_category": "Not assigned",
+        "financial_statement_level_risk": "Not assigned",
+        "affected_accounts": "Not assigned",
+        "affected_assertions": "Not assigned",
+        "affected_departments": "Not assigned",
+        "legal_reference": "",
+        "audit_standard_reference": "",
+        "legal_reference_explanation": "",
+        "audit_standard_explanation": "",
+        "reference_responsibility": "Engagement team",
+        "suggested_audit_response": (
+            "German-language headline retained for review, but not scored by the "
+            "current English NLP models."
+        ),
+    }
+
+
 def fetch_and_score_news():
     """Manual fetch: poll the news sources, score only new headlines, persist to
     SQLite. Triggered by the button (no automatic timer)."""
@@ -153,19 +213,26 @@ def fetch_and_score_news():
 
     with st.spinner(f"Fetching and scoring news for {companies[0]}…"):
         incoming = data_sources.poll_news(
-            n=5,
+            n=12,
             companies=companies,
             start_date=news_start_date,
             end_date=news_end_date,
         )
 
+        debug = data_sources.get_last_news_debug()
+
         new_count = 0
         for item in incoming:
             if database.headline_exists(item["company"], item["headline"]):
+                debug["skipped_already_cached"] = debug.get("skipped_already_cached", 0) + 1
                 continue
             try:
-                scored = nlp.score_headline(item)
+                if item.get("original_language") == "de":
+                    scored = _not_scored_language_record(item)
+                else:
+                    scored = nlp.score_headline(item)
                 if _scoring_failed(scored):
+                    debug["nlp_model_error_skipped"] = debug.get("nlp_model_error_skipped", 0) + 1
                     st.warning(
                         "NLP model error while scoring a headline — skipped "
                         "(not cached). Check the terminal for the traceback."
@@ -173,11 +240,128 @@ def fetch_and_score_news():
                     continue
                 database.save_headline(scored)
                 new_count += 1
+                debug["saved_to_sqlite"] = debug.get("saved_to_sqlite", 0) + 1
             except Exception as e:  # noqa: BLE001
+                debug["nlp_exception_skipped"] = debug.get("nlp_exception_skipped", 0) + 1
                 st.warning(f"NLP scoring failed: {e}")
                 continue
 
+        debug["sent_to_nlp_scoring"] = max(
+            0,
+            len(incoming) - debug.get("skipped_already_cached", 0),
+        )
+        st.session_state["news_debug"] = debug
+
     st.success(f"Fetched {len(incoming)} headline(s); {new_count} new and scored.")
+
+
+def render_news_diagnostics():
+    debug = st.session_state.get("news_debug")
+    if not debug:
+        return
+
+    with st.expander("News ingestion diagnostics", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Company", debug.get("selected_company", ""))
+        c2.metric("Ticker", debug.get("ticker", ""))
+        c3.metric("Sector", debug.get("sector", ""))
+
+        st.markdown("**Generated queries**")
+        st.write(debug.get("generated_queries", []))
+        st.markdown("**Normal history source**")
+        st.write(debug.get("normal_history_source", "GDELT / NewsAPI"))
+        if debug.get("gdelt_queries"):
+            st.markdown("**GDELT history queries used**")
+            st.write(debug.get("gdelt_queries", []))
+        st.markdown("**Date windows used**")
+        st.write(debug.get("date_windows", []))
+        if debug.get("selected_period_windows"):
+            st.markdown("**Full selected period windows**")
+            st.write(debug.get("selected_period_windows", []))
+
+        counts = {
+            "raw articles fetched": debug.get("raw_articles_fetched", 0),
+            "removed duplicates": debug.get("removed_as_duplicates", 0),
+            "removed by language filter": debug.get("removed_by_language_filter", 0),
+            "removed low-value/noise": debug.get("removed_low_value", 0),
+            "deduped before limit": debug.get("deduped_before_limit", 0),
+            "incoming from poll": debug.get("incoming_from_poll", 0),
+            "sent to NLP / retained": debug.get("sent_to_nlp_scoring", 0),
+            "saved to SQLite": debug.get("saved_to_sqlite", 0),
+            "skipped cached": debug.get("skipped_already_cached", 0),
+            "skipped NLP model error": debug.get("nlp_model_error_skipped", 0),
+            "skipped NLP exception": debug.get("nlp_exception_skipped", 0),
+        }
+        st.table(pd.DataFrame(counts.items(), columns=["step", "count"]))
+        if debug.get("incoming_headline_sample"):
+            st.markdown("**Incoming headlines from normal fetch**")
+            st.dataframe(
+                pd.DataFrame(debug["incoming_headline_sample"]),
+                width="stretch",
+                hide_index=True,
+            )
+
+
+def render_gdelt_debugger():
+    with st.expander("GDELT raw debugger", expanded=False):
+        st.caption(
+            "Runs a small raw source check before normal filtering and NLP scoring. "
+            "Use this when a company shows zero final matches."
+        )
+        max_windows = st.number_input(
+            "Monthly windows to test",
+            min_value=1,
+            max_value=12,
+            value=2,
+            step=1,
+        )
+        if st.button("Run raw GDELT debug", type="secondary"):
+            with st.spinner("Checking raw GDELT results..."):
+                result = data_sources.debug_gdelt_raw(
+                    selected_company,
+                    news_start_date,
+                    news_end_date,
+                    max_windows=int(max_windows),
+                )
+            st.session_state["gdelt_debug"] = result
+
+        result = st.session_state.get("gdelt_debug")
+        if not result:
+            return
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Company", result.get("official_company", ""))
+        c2.metric("Ticker", result.get("ticker", ""))
+        c3.metric("Sector", result.get("sector", ""))
+        st.markdown("**Queries tested**")
+        st.write(result.get("queries_tested", []))
+        st.markdown("**Windows tested**")
+        st.write(result.get("windows_tested", []))
+        st.markdown("**Totals**")
+        st.table(pd.DataFrame(result.get("totals", {}).items(), columns=["metric", "count"]))
+
+        for index, run in enumerate(result.get("runs", []), start=1):
+            with st.expander(
+                f"{index}. {run['window']} | raw={run['raw_articles']} | {run['query']}",
+                expanded=False,
+            ):
+                st.write(
+                    {
+                        "language_kept_in_sample": run["language_kept_in_sample"],
+                        "language_removed_in_sample": run["language_removed_in_sample"],
+                    }
+                )
+                if run.get("sample"):
+                    st.dataframe(
+                        pd.DataFrame(run["sample"]),
+                        width="stretch",
+                        hide_index=True,
+                        column_config={
+                            "url": st.column_config.LinkColumn("url", display_text="open"),
+                        },
+                    )
+                else:
+                    st.info("No raw articles returned for this query/window.")
 
 
 def live_feed():
@@ -186,7 +370,9 @@ def live_feed():
         return
 
     # Read the scored history straight from SQLite (no fetching here).
-    feed = database.get_recent_headlines(companies=companies, limit=50)
+    feed = _filter_feed_by_period(
+        database.get_recent_headlines(companies=companies, limit=200)
+    )[:50]
 
     warnings = [item for item in feed[:8] if item["is_warning"]]
     if warnings:
@@ -212,14 +398,12 @@ def live_feed():
     if feed:
         df = pd.DataFrame(feed)
         df["risk_drivers"] = df["risk_drivers"].apply(", ".join)
-        df["details"] = "#article-implications"
         df["implication"] = df.apply(
             lambda row: "Investigate" if row["is_warning"] else "No further investigation",
             axis=1,
         )
         df = df[
             [
-                "details",
                 "company",
                 "headline",
                 "sentiment",
@@ -242,11 +426,6 @@ def live_feed():
             width="stretch",
             hide_index=True,
             column_config={
-                "details": st.column_config.LinkColumn(
-                    "details",
-                    display_text="view",
-                    width="small",
-                ),
                 "company": st.column_config.TextColumn("company", width="small"),
                 "headline": st.column_config.TextColumn("headline", width="large"),
                 "sentiment": st.column_config.TextColumn("sentiment", width="small"),
@@ -319,6 +498,8 @@ if st.button(
 ):
     fetch_and_score_news()
 
+render_news_diagnostics()
+render_gdelt_debugger()
 live_feed()
 
 

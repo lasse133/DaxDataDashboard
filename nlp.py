@@ -34,6 +34,7 @@ if _env_file.exists():
             os.environ.setdefault(_k.strip(), _v.strip())
 
 HF_TOKEN = os.getenv("HF_TOKEN", None)
+_ZEROSHOT_RUNTIME_FAILED = False
 # =============================================================================
 # 1. MODEL INITIALIZATION AND CACHING
 # =============================================================================
@@ -104,11 +105,27 @@ def analyze_sentiment(text: str) -> dict:
 # =============================================================================
 # 3. RISK CLASSIFICATION ENGINE
 # =============================================================================
+def _keyword_risk_drivers(text: str) -> list[str]:
+    """Lightweight fallback if the zero-shot model is unavailable."""
+    lowered = text.lower()
+    matches = [
+        risk
+        for risk, keywords in config.RISK_DRIVERS.items()
+        if any(keyword.lower() in lowered for keyword in keywords)
+    ]
+    return matches if matches else ["Uncategorised"]
+
+
 def extract_risk_drivers(text: str) -> list[str]:
     """
     Use a zero-shot model to classify text into structural ISA-315 risk buckets.
     If the model fails, prints the exact error trace to the terminal window.
     """
+    global _ZEROSHOT_RUNTIME_FAILED
+
+    if _ZEROSHOT_RUNTIME_FAILED:
+        return _keyword_risk_drivers(text)
+
     try:
         classifier = _get_zeroshot_model()
         candidate_labels = list(config.RISK_DRIVERS.keys())
@@ -122,13 +139,13 @@ def extract_risk_drivers(text: str) -> list[str]:
         ]
         return valid_risks if valid_risks else ["Uncategorised"]
     except Exception as e:
-        print(f"\n--- [CRITICAL INFRASTRUCTURE ERROR: BART ZERO-SHOT RUNTIME] ---")
+        _ZEROSHOT_RUNTIME_FAILED = True
+        print("\n--- [BART ZERO-SHOT UNAVAILABLE: USING KEYWORD FALLBACK] ---")
         print(f"Error Type: {type(e).__name__}")
         print(f"Error Message: {e}")
-        traceback.print_exc()
-        print(f"---------------------------------------------------------------\n")
-        
-        return ["BART Model Error"]
+        print("Risk drivers will use config.RISK_DRIVERS keyword matching for this run.")
+        print("----------------------------------------------------------\n")
+        return _keyword_risk_drivers(text)
 
 
 # =============================================================================
