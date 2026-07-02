@@ -3,6 +3,8 @@ Streamlit dashboard for the DAX 40 Audit Risk Radar.
 """
 
 import datetime as dt
+from collections import Counter
+from email.utils import parsedate_to_datetime
 
 import pandas as pd
 import streamlit as st
@@ -65,6 +67,8 @@ st.sidebar.caption(
 )
 st.sidebar.caption("Prices: Direct Yahoo API (live)")
 
+selected_tickers = [config.DAX40[c] for c in companies]
+
 if st.sidebar.button(
     "🗑️ Clear cached news",
     help="Delete all stored headlines and the 1-hour API response cache, then reload.",
@@ -73,8 +77,6 @@ if st.sidebar.button(
     st.cache_data.clear()
     st.toast(f"Cleared {deleted} cached headline(s).")
     st.rerun()
-
-selected_tickers = [config.DAX40[c] for c in companies]
 
 st.title("DAX40 Data Dashboard")
 st.caption(
@@ -213,7 +215,7 @@ def fetch_and_score_news():
 
     with st.spinner(f"Fetching and scoring news for {companies[0]}…"):
         incoming = data_sources.poll_news(
-            n=12,
+            n=24,
             companies=companies,
             start_date=news_start_date,
             end_date=news_end_date,
@@ -250,6 +252,7 @@ def fetch_and_score_news():
             0,
             len(incoming) - debug.get("skipped_already_cached", 0),
         )
+        debug["source_counts"] = dict(Counter(item.get("source", "Unknown") for item in incoming))
         st.session_state["news_debug"] = debug
 
     st.success(f"Fetched {len(incoming)} headline(s); {new_count} new and scored.")
@@ -293,6 +296,13 @@ def render_news_diagnostics():
             "skipped NLP exception": debug.get("nlp_exception_skipped", 0),
         }
         st.table(pd.DataFrame(counts.items(), columns=["step", "count"]))
+        if debug.get("source_counts"):
+            st.markdown("**Retained headlines by source**")
+            source_counts = pd.DataFrame(
+                sorted(debug["source_counts"].items(), key=lambda item: item[1], reverse=True),
+                columns=["source", "count"],
+            )
+            st.dataframe(source_counts, hide_index=True, width="stretch")
         if debug.get("incoming_headline_sample"):
             st.markdown("**Incoming headlines from normal fetch**")
             st.dataframe(

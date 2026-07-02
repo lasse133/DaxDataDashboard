@@ -5,39 +5,110 @@ developments, and support structured audit risk assessment (ISA 315).
 
 ## Recent Updates
 
-- Reporting windows now run from **2025 onward** and are selected by quarter, so
+- The dashboard is now fully **live-fetch** focused: there is no separate offline
+  backfill job or backfill status tracker.
+- Reporting windows run from **2025 onward** and are selected by quarter, so
   choosing **Q1-Q4** gives a full-year view.
-- Audit keyword and reference mapping now lives in the scoring layer, which makes
-  the risk labels explainable and ties them back to legal and audit references.
-- The normal news flow now combines **NewsAPI** for recent items with **Google
-  News RSS** for history, while **GDELT** remains available for raw debugging and
-  fallback checks.
-- The fetch/scoring path currently processes only about **12 articles per run**, so
-  the dashboard is a sampled risk view rather than an exhaustive article set.
+- Audit keyword and reference mapping lives in the scoring layer, which makes the
+  risk labels explainable and ties them back to legal and audit references.
+- The news flow combines **NewsAPI** for recent items with **Google News RSS** for
+  history, while **GDELT** remains available for raw debugging and fallback checks.
 - Coverage is still heuristic, so some companies, especially SAP, may skew toward
   investor-relations and earnings-style coverage until broader keyword search is
   added.
 
 > **Streaming-first:** every value shown in the dashboard is fetched **live from an
 > API at request time**. No scraped CSV is read at runtime — the project focuses on
-> data streaming, not batch files. (The `data/` folder only holds a SQLite cache of
-> already-scored headlines.)
+> data streaming, not batch files. The `data/` folder only holds the SQLite cache
+> of already-scored headlines.
 
 ---
 
-## Data flow
+## Use case diagram
 
+```mermaid
+flowchart LR
+  analyst([Engagement team / audit analyst])
+
+  subgraph boundary["DAX 40 Audit Risk Radar system boundary"]
+    direction TB
+    select((Select company))
+    period((Select reporting period))
+    fetch((Fetch latest news))
+    score((Score and tag headlines))
+    review((Review risk signals and warnings))
+    implications((Inspect article implications))
+    prices((View stock prices))
+    clear((Clear cached headlines))
+  end
+
+  analyst --> select
+  analyst --> period
+  analyst --> fetch
+  analyst --> review
+  analyst --> implications
+  analyst --> prices
+  analyst --> clear
+
+  select -.->|part of selection| fetch
+  period -.->|part of selection| fetch
+  fetch -.->|include| score
+  score -.->|produces| review
+  score -.->|produces| implications
+  fetch -.->|uses| prices
 ```
-INGEST                          PROCESS / SCORE                    VISUALIZE
-┌──────────────────────────┐   ┌──────────────────────────────┐   ┌──────────────────────┐
-│ NewsAPI + Google News RSS │──▶│ FinBERT + BART + audit refs  │──▶│ Streamlit risk view  │
-│ + GDELT raw debug         │   │ (nlp.py + audit_references)  │   │ + price chart        │
-│ Yahoo prices              │   │                              │   │                      │
-└──────────────────────────┘   └──────────────────────────────┘   └──────────────────────┘
-                  │
-             scored records cached in
-             SQLite (database.py)
+
+## Data flow diagram
+
+```mermaid
+flowchart LR
+  analyst([Audit analyst])
+  newsapi[NewsAPI]
+  google[Google News RSS]
+  gdelt[GDELT DOC 2.0]
+  huggingface[Hugging Face Hub\n(FinBERT / BART)]
+  yahoo[Yahoo Finance chart API]
+
+  p1([1.0 Request news])
+  p2([2.0 Normalize and score])
+  p3([3.0 Store and present results])
+
+  d1[(SQLite headline cache)]
+
+  analyst -->|company + reporting period| p1
+  analyst -->|selected tickers| yahoo
+  analyst -->|clear cached headlines| d1
+
+  p1 -->|news query| newsapi
+  p1 -->|history query| google
+  p1 -->|debug query| gdelt
+
+  newsapi -->|headline text| p2
+  google -->|headline text| p2
+  gdelt -->|headline text| p2
+  yahoo -->|price ticks| p3
+
+  p2 -->|model inputs| huggingface
+  huggingface -->|sentiment scores + risk tags| p2
+
+  p2 -->|scored headlines| d1
+  d1 -->|cached headlines| p3
+
+  p3 -->|warnings + charts| analyst
 ```
+
+The use case diagram is centered on the external audit analyst and the dashboard
+boundary, while the data flow diagram labels each arrow with the data being moved.
+That keeps the two diagrams in the correct notation and avoids treating arrows as
+generic connections.
+
+The dashboard flow is intentionally live-first: recent news comes from NewsAPI,
+older reporting windows are filled by Google News RSS, and GDELT is kept for raw
+debugging or fallback checks. Cached headlines stay in SQLite so repeat views stay
+fast, but there is no separate offline backfill process anymore.
+
+Standalone versions are available in [diagrams/use-case-diagram.md](diagrams/use-case-diagram.md)
+and [diagrams/data-flow-diagram.md](diagrams/data-flow-diagram.md).
 
 ## Data sources (all live APIs)
 
@@ -88,8 +159,6 @@ Both paths are filtered to **English** and to the **selected company**.
 - **Manual fetch only.** News is fetched **on demand** when you click **🔄 Fetch latest
   news** — there is no automatic timer. The feed otherwise just displays what is already
   scored in the cache.
-- **Per-run cap.** Each fetch currently scores only a small batch of headlines, roughly
-  a dozen articles per run, which keeps the models responsive but limits completeness.
 - **Quarter-based reporting.** The sidebar starts at reporting year **2025** and lets
   you combine any quarters in that year or later, which makes it easier to keep at least
   one full year in scope.
@@ -111,8 +180,6 @@ Both paths are filtered to **English** and to the **selected company**.
    with a `UNIQUE(company, headline)` constraint, so a headline is only scored once.
 
 Use the **🗑️ Clear cached news** button (sidebar) to wipe both layers and start fresh.
-
----
 
 ## Quick start
 

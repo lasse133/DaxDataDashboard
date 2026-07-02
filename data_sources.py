@@ -253,6 +253,15 @@ LOW_VALUE_HEADLINE_TERMS = [
     "sells shares",
     "dividend stock",
     "mega-cap stock",
+    "quarterly statement",
+    "financial results",
+    "earnings call",
+    "earnings call highlights",
+    "full-year results",
+    "results presentation",
+    "investor relations",
+    "press release",
+    "profit forecasts",
 ]
 
 HIGH_VALUE_AUDIT_TERMS = [
@@ -364,9 +373,10 @@ def build_news_queries(company_row: dict, max_queries: int = 12) -> list[str]:
     queries.extend([
         f'"{primary}" {_terms("regulatory_legal", limit=5)}',
         f'"{primary}" {_terms("regulatory_legal", "provisions_contingent_liabilities", limit=5)}',
-        f'"{primary}" {_terms("financial_liquidity", "earnings_forecast_impairment", limit=5)}',
-        f'"{primary}" {_terms("operational_supply_chain", "restructuring_labor", limit=5)}',
-        f'"{primary}" {_terms("cyber_it_data", "governance_fraud_accounting", limit=5)}',
+        f'"{primary}" {_terms("financial_liquidity", "governance_fraud_accounting", limit=5)}',
+        f'"{primary}" {_terms("operational_supply_chain", "cyber_it_data", limit=5)}',
+        f'"{primary}" {_terms("product_quality_recall", "tax_customs_trade", limit=5)}',
+        f'"{primary}" {_terms("esg_climate_environment", "ma_strategy_assets", limit=5)}',
     ])
     sector_terms = SECTOR_SPECIFIC_QUERY_TERMS.get(sector, [])
     if sector_terms:
@@ -462,6 +472,22 @@ def _monthly_windows(start_date, end_date) -> list[tuple[dt.date, dt.date]]:
     return windows or [(requested_start, requested_end_exclusive)]
 
 
+def _daily_windows(start_date, end_date) -> list[tuple[dt.date, dt.date]]:
+    """Return one-day windows covering [start_date, end_date]."""
+    if not start_date:
+        start_date = dt.date.fromisoformat(DATE_WINDOWS[0][0])
+    if not end_date:
+        end_date = dt.date.today()
+
+    windows = []
+    current = start_date
+    while current <= end_date:
+        next_day = current + dt.timedelta(days=1)
+        windows.append((current, next_day))
+        current = next_day
+    return windows
+
+
 def _quarter_sample_windows(windows: list[tuple[dt.date, dt.date]]) -> list[tuple[dt.date, dt.date]]:
     selected = []
     seen_quarters = set()
@@ -481,6 +507,23 @@ def _language_allowed(lang: str, title: str) -> tuple[bool, str]:
     if lang in ("english", "eng", "en", "") and _is_probably_english(title):
         return True, "en"
     return False, lang or "unknown"
+
+
+def _company_title_allowed(title: str, company_row: dict) -> bool:
+    """Keep only headlines that actually mention the selected company."""
+    normalized_title = _norm(title)
+    company_tokens = {
+        _norm(company_row.get("display_name", "")),
+        _norm(company_row.get("company_name", "")),
+        _norm(company_row.get("ticker", "")),
+    }
+    for alias in _aliases_for_company(
+        company_row.get("display_name") or company_row.get("company_name", ""),
+        company_row.get("company_name", ""),
+    ):
+        company_tokens.add(_norm(alias))
+    company_tokens.discard("")
+    return any(token and token in normalized_title for token in company_tokens)
 
 
 def _dedupe_key(item: dict) -> tuple[str, str, str, str]:
@@ -560,6 +603,7 @@ def _new_debug(company_row: dict, queries: list[str], windows: list[tuple[dt.dat
         "raw_articles_fetched": 0,
         "removed_as_duplicates": 0,
         "removed_by_language_filter": 0,
+        "removed_low_value": 0,
         "sent_to_nlp_scoring": 0,
         "saved_to_sqlite": 0,
         "skipped_already_cached": 0,
@@ -780,6 +824,9 @@ def _newsapi_news_expanded(
                     if not allowed:
                         debug["removed_by_language_filter"] += 1
                         continue
+                    if not _company_title_allowed(title, company_row):
+                        debug["removed_low_value"] += 1
+                        continue
                     results.append({
                         "company": display_name,
                         "headline": title,
@@ -817,6 +864,9 @@ def _gdelt_news_expanded(
                 allowed, detected_lang = _language_allowed(article.get("language", ""), title)
                 if not allowed:
                     debug["removed_by_language_filter"] += 1
+                    continue
+                if not _company_title_allowed(title, company_row):
+                    debug["removed_low_value"] += 1
                     continue
                 results.append({
                     "company": display_name,
@@ -878,10 +928,10 @@ def _google_news_history(
 
     results = []
     terms_by_language = {
-        "en": "earnings OR revenue OR profit OR forecast OR restructuring OR lawsuit OR investigation",
-        "de": "Gewinn OR Umsatz OR Prognose OR Restrukturierung OR Klage OR Ermittlung",
+        "en": "lawsuit OR investigation OR recall OR cyberattack OR data breach OR outage OR restructuring OR layoffs OR supply chain OR margin pressure OR compliance OR regulation OR fine",
+        "de": "Klage OR Ermittlung OR Rückruf OR Cyberangriff OR Datenleck OR Ausfall OR Restrukturierung OR Stellenabbau OR Lieferkette OR Margendruck OR Compliance OR Regulierung OR Bußgeld",
     }
-    per_query = max(3, page_size // max(1, len(windows)))
+    per_query = max(5, page_size // max(1, len(windows)))
     for start, end in windows:
         for language, terms in terms_by_language.items():
             query = f'"{anchor}" ({terms}) after:{start.isoformat()} before:{end.isoformat()}'
@@ -1001,18 +1051,14 @@ def poll_news(
     selected = list(companies) if companies else ["SAP"]
     company_row = _row_for_company(selected[0])
     queries = build_news_queries(company_row, max_queries=12)
-    gdelt_queries = _compact_gdelt_queries(company_row)
     windows = _monthly_windows(start_date, end_date)
-    gdelt_windows = _quarter_sample_windows(windows)
-    gdelt_queries_for_fetch = gdelt_queries[:1]
-    debug = _new_debug(company_row, queries, gdelt_windows)
+    debug = _new_debug(company_row, queries, windows)
     debug["selected_period_windows"] = [(s.isoformat(), e.isoformat()) for s, e in windows]
-    debug["gdelt_queries"] = []
     debug["normal_history_source"] = "Google News RSS"
 
     combined = []
     combined += _newsapi_news_expanded(company_row, queries, windows, debug, page_size=n)
-    combined += _google_news_history(company_row, gdelt_windows, debug, page_size=n)
+    combined += _google_news_history(company_row, windows, debug, page_size=n)
 
     # De-duplicate after fetching across aliases, queries, and monthly windows.
     seen, deduped = set(), []
@@ -1040,5 +1086,61 @@ def poll_news(
         }
         for item in deduped[:10]
     ]
+    _LAST_NEWS_DEBUG = debug
+    return deduped
+
+
+def fetch_news_batch(
+    companies: Iterable[str] | None = None,
+    start_date=None,
+    end_date=None,
+    window: str = "day",
+    page_size: int = 12,
+) -> list[dict]:
+    """Fetch news without the dashboard cap so offline backfills can fill SQLite.
+
+    The returned list is deduplicated, filtered by company/title, and sorted by
+    the same relevance rules as the dashboard, but it is not truncated to a
+    fixed number of items.
+    """
+    selected = list(companies) if companies else ["SAP"]
+    company_row = _row_for_company(selected[0])
+    queries = build_news_queries(company_row, max_queries=12)
+    if window == "day":
+        windows = _daily_windows(start_date, end_date)
+    else:
+        windows = _monthly_windows(start_date, end_date)
+
+    debug = _new_debug(company_row, queries, windows)
+    debug["selected_period_windows"] = [(s.isoformat(), e.isoformat()) for s, e in windows]
+    debug["normal_history_source"] = "Google News RSS"
+
+    combined = []
+    combined += _newsapi_news_expanded(company_row, queries, windows, debug, page_size=page_size)
+    combined += _google_news_history(company_row, windows, debug, page_size=page_size)
+
+    seen, deduped = set(), []
+    for item in combined:
+        key = _dedupe_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+
+    deduped = _rank_for_dashboard(deduped)
+    debug["deduped_before_limit"] = len(deduped)
+    debug["incoming_from_poll"] = len(deduped)
+    debug["sent_to_nlp_scoring"] = len(deduped)
+    debug["incoming_headline_sample"] = [
+        {
+            "headline": item.get("headline", ""),
+            "language": item.get("original_language", ""),
+            "source": item.get("source", ""),
+            "published": item.get("published", ""),
+            "query": item.get("query", ""),
+        }
+        for item in deduped[:10]
+    ]
+    global _LAST_NEWS_DEBUG
     _LAST_NEWS_DEBUG = debug
     return deduped
