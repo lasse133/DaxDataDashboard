@@ -12,6 +12,7 @@ flowchart LR
         period((Select reporting period))
         fetch((Fetch latest news))
         score((Score and tag headlines))
+        radar((View risk radar))
         review((Review risk signals and warnings))
         implications((Inspect article implications))
         prices((View stock prices))
@@ -21,6 +22,7 @@ flowchart LR
     analyst --> select
     analyst --> period
     analyst --> fetch
+    analyst --> radar
     analyst --> review
     analyst --> implications
     analyst --> prices
@@ -29,6 +31,8 @@ flowchart LR
     select -.->|part of selection| fetch
     period -.->|part of selection| fetch
     fetch -.->|include| score
+    score -.->|feeds| radar
+    radar -.->|supports| review
     score -.->|produces| review
     score -.->|produces| implications
     fetch -.->|uses| prices

@@ -102,6 +102,9 @@ boundary, while the data flow diagram labels each arrow with the data being move
 That keeps the two diagrams in the correct notation and avoids treating arrows as
 generic connections.
 
+The radar itself is part of the visible product output, so the diagrams now show a
+dedicated "View risk radar" use case and a "Store and present risk radar" DFD step.
+
 The dashboard flow is intentionally live-first: recent news comes from NewsAPI,
 older reporting windows are filled by Google News RSS, and GDELT is kept for raw
 debugging or fallback checks. Cached headlines stay in SQLite so repeat views stay

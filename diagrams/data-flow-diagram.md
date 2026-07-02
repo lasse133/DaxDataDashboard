@@ -13,7 +13,7 @@ flowchart LR
 
     p1([1.0 Request news])
     p2([2.0 Normalize and score])
-    p3([3.0 Store and present results])
+    p3([3.0 Store and present risk radar])
 
     d1[(SQLite headline cache)]
 
@@ -36,5 +36,5 @@ flowchart LR
     p2 -->|scored headlines| d1
     d1 -->|cached headlines| p3
 
-    p3 -->|warnings + charts| analyst
+    p3 -->|warnings + radar view| analyst
 ```
