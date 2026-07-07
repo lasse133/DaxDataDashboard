@@ -1,0 +1,217 @@
+# DAX 40 constituents — ticker + name variants for news filtering
+#
+# Purpose:
+#   The `aliases` list is used by services/news/merger.py to decide whether a
+#   fetched headline actually mentions the selected company. A headline passes
+#   the filter if ANY alias (case-insensitive, whole-word) appears in the title
+#   or first paragraph.
+#
+# Yahoo Finance suffix ".DE" = Xetra listing.
+#
+# NOTE: DAX 40 composition changes ~annually (index review by Deutsche Börse).
+# Verify against https://www.dax-indices.com before each audit engagement.
+# Snapshot date of this file: keep in git history.
+#
+# Keep aliases MINIMAL — one false positive is worse than one missed hit,
+# because auditors will lose trust in the filter.
+
+- ticker: ADS.DE
+  name: Adidas AG
+  sector: Consumer Discretionary
+  aliases: [Adidas, "Adidas AG"]
+
+- ticker: AIR.DE
+  name: Airbus SE
+  sector: Industrials
+  aliases: [Airbus, "Airbus SE", "Airbus Group"]
+
+- ticker: ALV.DE
+  name: Allianz SE
+  sector: Financials
+  aliases: [Allianz, "Allianz SE", "Allianz Group"]
+
+- ticker: BAS.DE
+  name: BASF SE
+  sector: Materials
+  aliases: [BASF, "BASF SE"]
+
+- ticker: BAYN.DE
+  name: Bayer AG
+  sector: Health Care
+  aliases: [Bayer, "Bayer AG"]
+
+- ticker: BEI.DE
+  name: Beiersdorf AG
+  sector: Consumer Staples
+  aliases: [Beiersdorf, "Beiersdorf AG", Nivea]
+
+- ticker: BMW.DE
+  name: Bayerische Motoren Werke AG
+  sector: Consumer Discretionary
+  aliases: [BMW, "BMW AG", "BMW Group", "Bayerische Motoren Werke"]
+
+- ticker: BNR.DE
+  name: Brenntag SE
+  sector: Materials
+  aliases: [Brenntag, "Brenntag SE"]
+
+- ticker: CBK.DE
+  name: Commerzbank AG
+  sector: Financials
+  aliases: [Commerzbank, "Commerzbank AG"]
+
+- ticker: CON.DE
+  name: Continental AG
+  sector: Consumer Discretionary
+  # 'Continental' is common English word — always require corporate suffix or German context
+  aliases: ["Continental AG", "Continental Aktiengesellschaft", "Conti AG"]
+
+- ticker: DTG.DE
+  name: Daimler Truck Holding AG
+  sector: Industrials
+  aliases: ["Daimler Truck", "Daimler Truck Holding", "Daimler Trucks"]
+
+- ticker: DBK.DE
+  name: Deutsche Bank AG
+  sector: Financials
+  aliases: ["Deutsche Bank", "Deutsche Bank AG", "DB AG"]
+
+- ticker: DB1.DE
+  name: Deutsche Börse AG
+  sector: Financials
+  aliases: ["Deutsche Boerse", "Deutsche Börse", "Deutsche Börse AG"]
+
+- ticker: DHL.DE
+  name: DHL Group
+  sector: Industrials
+  aliases: ["DHL Group", "Deutsche Post", "Deutsche Post DHL", DHL]
+
+- ticker: DTE.DE
+  name: Deutsche Telekom AG
+  sector: Communication Services
+  aliases: ["Deutsche Telekom", "Deutsche Telekom AG", "T-Mobile parent"]
+
+- ticker: EOAN.DE
+  name: E.ON SE
+  sector: Utilities
+  aliases: [E.ON, "E.ON SE", EON]
+
+- ticker: ENR.DE
+  name: Siemens Energy AG
+  sector: Industrials
+  aliases: ["Siemens Energy", "Siemens Energy AG"]
+
+- ticker: FRE.DE
+  name: Fresenius SE
+  sector: Health Care
+  aliases: [Fresenius, "Fresenius SE", "Fresenius & Co"]
+
+- ticker: HEI.DE
+  name: Heidelberg Materials AG
+  sector: Materials
+  aliases: ["Heidelberg Materials", "HeidelbergCement", "Heidelberg Cement"]
+
+- ticker: HEN3.DE
+  name: Henkel AG & Co. KGaA
+  sector: Consumer Staples
+  aliases: [Henkel, "Henkel AG", "Henkel KGaA"]
+
+- ticker: HNR1.DE
+  name: Hannover Rück SE
+  sector: Financials
+  aliases: ["Hannover Rueck", "Hannover Rück", "Hannover Re"]
+
+- ticker: IFX.DE
+  name: Infineon Technologies AG
+  sector: Information Technology
+  aliases: [Infineon, "Infineon Technologies", "Infineon AG"]
+
+- ticker: MBG.DE
+  name: Mercedes-Benz Group AG
+  sector: Consumer Discretionary
+  aliases: ["Mercedes-Benz", "Mercedes-Benz Group", "Mercedes Benz"]
+
+- ticker: MRK.DE
+  name: Merck KGaA
+  sector: Health Care
+  # CRITICAL: 'Merck' alone is ambiguous with Merck & Co (US, MRK on NYSE).
+  # Always require KGaA / Darmstadt to disambiguate.
+  aliases: ["Merck KGaA", "Merck Darmstadt", "Merck Group Darmstadt"]
+
+- ticker: MTX.DE
+  name: MTU Aero Engines AG
+  sector: Industrials
+  aliases: [MTU, "MTU Aero Engines", "MTU Aero"]
+
+- ticker: MUV2.DE
+  name: Münchener Rückversicherungs-Gesellschaft AG
+  sector: Financials
+  aliases: ["Munich Re", "Muenchener Rueck", "Münchener Rück", "Munich Reinsurance"]
+
+- ticker: P911.DE
+  name: Dr. Ing. h.c. F. Porsche AG
+  sector: Consumer Discretionary
+  # Disambiguate from Porsche SE (holding company, PAH3.DE) — require 'AG' suffix
+  aliases: ["Porsche AG", "Porsche Automobil"]
+
+- ticker: PAH3.DE
+  name: Porsche Automobil Holding SE
+  sector: Consumer Discretionary
+  aliases: ["Porsche SE", "Porsche Holding", "Porsche Automobil Holding"]
+
+- ticker: QIA.DE
+  name: Qiagen N.V.
+  sector: Health Care
+  aliases: [Qiagen, "Qiagen NV", "Qiagen N.V."]
+
+- ticker: RHM.DE
+  name: Rheinmetall AG
+  sector: Industrials
+  aliases: [Rheinmetall, "Rheinmetall AG"]
+
+- ticker: RWE.DE
+  name: RWE AG
+  sector: Utilities
+  aliases: [RWE, "RWE AG"]
+
+- ticker: SAP.DE
+  name: SAP SE
+  sector: Information Technology
+  aliases: [SAP, "SAP SE", "SAP AG"]
+
+- ticker: SIE.DE
+  name: Siemens AG
+  sector: Industrials
+  # 'Siemens' alone matches Siemens Energy / Healthineers headlines too — filter must
+  # additionally EXCLUDE those in the merger step; kept simple here.
+  aliases: ["Siemens AG"]
+
+- ticker: SHL.DE
+  name: Siemens Healthineers AG
+  sector: Health Care
+  aliases: ["Siemens Healthineers", Healthineers]
+
+- ticker: SRT3.DE
+  name: Sartorius AG
+  sector: Health Care
+  aliases: [Sartorius, "Sartorius AG"]
+
+- ticker: SY1.DE
+  name: Symrise AG
+  sector: Materials
+  aliases: [Symrise, "Symrise AG"]
+
+- ticker: VNA.DE
+  name: Vonovia SE
+  sector: Real Estate
+  aliases: [Vonovia, "Vonovia SE"]
+
+- ticker: VOW3.DE
+  name: Volkswagen AG
+  sector: Consumer Discretionary
+  aliases: [Volkswagen, "Volkswagen AG", VW, "VW Group"]
+
+- ticker: ZAL.DE
+  name: Zalando SE
+  sector: Consumer Discretionary
+  aliases: [Zalando, "Zalando SE"]
