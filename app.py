@@ -78,6 +78,12 @@ if st.sidebar.button(
     st.toast(f"Cleared {deleted} cached headline(s).")
     st.rerun()
 
+show_diagnostics = st.sidebar.checkbox(
+    "Show developer diagnostics",
+    value=False,
+    help="Show the news ingestion diagnostics and the GDELT raw debugger.",
+)
+
 st.title("DAX40 Data Dashboard")
 st.caption(
     "Real-time screening of market and news data to surface ISA 315 risk signals. "
@@ -508,8 +514,9 @@ if st.button(
 ):
     fetch_and_score_news()
 
-render_news_diagnostics()
-render_gdelt_debugger()
+if show_diagnostics:
+    render_news_diagnostics()
+    render_gdelt_debugger()
 live_feed()
 
 
