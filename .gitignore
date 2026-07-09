@@ -1,6 +1,19 @@
+# Python
 __pycache__/
 *.pyc
-.DS_Store
 .venv/
-*.egg-info/
-.env
+venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# HuggingFace model cache (can grow to several GB)
+.cache/
+~/.cache/huggingface/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+.claude/

@@ -1,12 +1,31 @@
-# Dashboard (streaming app)
-streamlit>=1.33
+# DAX 40 Audit Risk Radar — dependencies
+# Pinned to major versions to keep the demo reproducible.
+
+streamlit>=1.36,<2.0
+pyyaml>=6.0
+
+# Prices
 yfinance>=0.2.40
-transformers>=4.40
-torch>=2.2
-torchvision>=0.17
-pandas>=2.0
-requests>=2.31
-# Pipeline (batch scrapers in pipeline/)
-beautifulsoup4
-lxml
-html5lib
+
+# News (both free, no API key required)
+feedparser>=6.0          # Google News RSS
+requests>=2.31           # GDELT DOC 2.0 API
+
+# Deep-learning inference (pretrained, no training)
+transformers>=4.40,<5.0
+torch>=2.2               # CPU wheels are fine for this demo
+sentencepiece>=0.2       # required by Helsinki-NLP MT models
+sacremoses>=0.1          # required by MarianMT tokenizer
+
+# Language detection (small, non-neural, fast)
+langdetect>=1.0.9
+
+# Fuzzy dedupe of near-identical headlines
+rapidfuzz>=3.9
+
+# Plotting
+plotly>=5.22
+pandas>=2.2
+
+# PDF export
+reportlab>=4.2

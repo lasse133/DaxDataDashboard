@@ -1,74 +1,121 @@
-# DAX40 Audit Risk Radar
+# DAX 40 Audit Risk Radar
 
-This repository currently contains two layers of history:
+A Streamlit dashboard that helps auditors satisfy **ISA 315** ("Identifying and
+Assessing the Risks of Material Misstatement") for DAX 40 companies. It streams
+live news and daily stock prices for a selected company and quarter, runs each
+headline through pretrained deep-learning models, and maps the output to
+concrete audit and legal references.
 
-- the active implementation in `dax/`, which is the current `new_dax_update` version
-- older root-level files and legacy batch artifacts that should be treated as archival unless you explicitly need them
+> **This tool supports the auditor's professional judgment. It does not perform
+> the ISA 315 risk assessment itself.**
 
-The current project is a Streamlit dashboard for ISA 315 support. It uses live news fetching, per-headline streaming analysis, a risk radar, and JSON/PDF workpaper exports.
+---
 
-## Current files to keep
+## Required technologies
 
-These are the files that match the current project state:
+| Requirement | How it is satisfied |
+|---|---|
+| **Distributed / stream processing (Streamlit)** | Headlines flow through a staged pipeline (fetch → language detect → translate → sentiment + topics → risk mapping). The app processes one headline per `st.rerun()`, so rows appear incrementally and Pause / Resume controls stay responsive. |
+| **Deep learning** | Three pretrained transformer models used for inference only: MarianMT (translation), FinBERT (financial sentiment), DeBERTa-v3-MNLI (zero-shot topic classification). See the sidebar's "Deep-learning stack" panel. |
 
-- `dax/app.py`
-- `dax/services/news.py`
-- `dax/services/prices.py`
-- `dax/services/nlp.py`
-- `dax/services/risk.py`
-- `dax/domain/company_aliases.yaml`
-- `dax/domain/isa315_map.yaml`
-- `dax/doc/data-flow.md`
-- `dax/doc/design-decisions.md`
-- `dax/doc/risk-radar-output.md`
-- `dax/README.md`
-- `dax/pyproject.toml`
-- `dax/requirements.txt`
-- `dax/uv.lock`
-- `diagrams/use-case-diagram.md`
-- `diagrams/data-flow-diagram.md`
+## Data sources (all free, no API key required)
 
-## Files that are legacy or older
+- **Prices** — Yahoo Finance via `yfinance` (daily OHLC over the selected quarter).
+- **News** — GDELT DOC 2.0 API + Google News RSS (English and German).
 
-These are the main leftovers from earlier versions of the project:
+## Setup with uv
 
-- `app.py`
-- `config.py`
-- `data_sources.py`
-- `database.py`
-- `nlp.py`
-- `audit_references.py`
-- `audit.jsonl`
-- `gdelt_sample.json`
-- `test_api.py`
-- `pipeline/`
-- `data/company_news.csv`
-- `data/dax_companies.csv`
-- `data/risk_signals.csv`
-- `data/yahoo_ticker_mapping.csv`
-- root-level `pyproject.toml`
-- root-level `requirements.txt`
-- root-level `uv.lock`
+Install `uv` once if it is not already available:
 
-## Current architecture
+```bash
+pip install uv
+```
 
-The active branch uses:
+Then run the dashboard from this folder:
 
-- GDELT DOC 2.0 and Google News RSS for news
-- Yahoo Finance for prices
-- Hugging Face transformer models for translation, sentiment, and topic scoring
-- a YAML rule catalog for ISA 315 risk mapping
-- Streamlit session state for pause/resume/reset streaming behavior
+```bash
+uv run streamlit run app.py
+```
 
-The reporting-period view processes one headline per rerun, so the analyst can pause and resume the pipeline while keeping the UI responsive.
+`uv` creates and manages the virtual environment automatically from
+`pyproject.toml`.
 
-## Where to start
+## Setup with plain venv
 
-If you want the current version of the project, start with:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
+```
 
-- [dax/app.py](dax/app.py)
-- [dax/services/news.py](dax/services/news.py)
-- [dax/services/risk.py](dax/services/risk.py)
-- [dax/README.md](dax/README.md)
+The first run downloads three transformer models (~1.5 GB total) from
+HuggingFace and caches them locally. Subsequent runs are fast.
 
-The diagrams in [diagrams/use-case-diagram.md](diagrams/use-case-diagram.md) and [diagrams/data-flow-diagram.md](diagrams/data-flow-diagram.md) now match this version.
+## Using the app
+
+1. Pick a DAX 40 company from the sidebar.
+2. Choose a workspace:
+   - **Reporting period** for quarter-based audit risk scoring.
+   - **Market news** for fast external-news monitoring without running the ML pipeline.
+   - **Company channels** for company-owned communications such as press
+     releases, investor relations, announcements, and indexed social posts.
+3. In **Reporting period**, pick one or more quarters and click
+   **🔄 Fetch latest data**. Headlines are fetched and processed one by one —
+   rows appear in the results table as each finishes.
+   Stock prices default to year-to-date, from January 1 of the current year to
+   today, and can be changed to a custom historical range in the sidebar.
+4. Review the aggregated **Risk radar** and open any expander to see:
+   - the exact deep-learning signals (sentiment score, matched topics),
+   - the ISA / IDW paragraphs that apply,
+   - suggested audit procedures.
+5. Export the reporting-period workpaper as JSON or PDF. The PDF export is
+   headline-level evidence; it does not summarize full article bodies.
+
+The lightweight news workspaces include keyword search and risk-driver term
+charts for quick auditor scanning.
+
+For a detailed explanation of the risk radar, top-topic scores, and
+high/medium/low flag labels, see
+[`doc/risk-radar-output.md`](doc/risk-radar-output.md).
+
+## Project layout
+
+```
+dax/
+├── app.py                          # Streamlit UI (thin — presentation only)
+├── requirements.txt
+├── doc/
+│   ├── data-flow.md                # Mermaid diagrams for the pipeline
+│   ├── design-decisions.md         # Architecture and design rationale
+│   └── risk-radar-output.md        # How to interpret the output
+├── domain/
+│   ├── company_aliases.yaml        # 40 tickers + name aliases for filtering
+│   └── isa315_map.yaml             # ISA 315 rule catalog (rules-as-data)
+└── services/
+    ├── news.py                     # GDELT + Google News RSS, dedupe + filter
+    ├── prices.py                   # yfinance wrapper
+    ├── nlp.py                      # translate + sentiment + zero-shot topics
+    └── risk.py                     # rule engine (analysis → RiskFlag[])
+```
+
+## Design principles
+
+- **Rules-as-data.** All audit rules live in `domain/isa315_map.yaml`, not in
+  Python. An audit partner can review the catalog without reading code.
+- **Manual refresh only.** The page is frozen until the user clicks Refresh,
+  so screenshots are stable — important for workpapers.
+- **Traceable flags.** Every flag exposes the deep-learning outputs that
+  triggered it (topic scores, sentiment label + confidence) and the exact
+  ISA / IDW paragraphs invoked.
+- **Reproducibility.** Pretrained model IDs are pinned; language detection is
+  seeded; the snapshot export contains the full model registry.
+
+## Known limitations
+
+- Free news sources have limited historical depth. Older quarters may return
+  few or no results — this is expected.
+- Zero-shot classification is imperfect; scores are thresholded but auditors
+  should always review flagged headlines before acting on them.
+- DAX 40 index composition changes ~annually. Verify `company_aliases.yaml`
+  against the current index constituents before an engagement.
