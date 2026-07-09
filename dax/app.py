@@ -117,7 +117,13 @@ st.markdown(
         border-right: 3px solid #2a78ad;
         box-shadow: 8px 0 24px rgba(11, 41, 69, 0.10);
     }
-    [data-testid="stSidebar"] * {
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
         color: #f8fafc;
     }
     [data-testid="stSidebar"] h1 {
@@ -132,15 +138,36 @@ st.markdown(
         border-color: rgba(255, 255, 255, 0.12);
         margin: 1.25rem 0;
     }
-    [data-testid="stSidebar"] [data-baseweb="select"] > div,
+    [data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+    [data-testid="stSidebar"] [data-testid="stMultiSelect"] [data-baseweb="select"] > div,
     [data-testid="stSidebar"] [data-baseweb="input"] > div {
-        background: #ffffff;
-        border-color: transparent;
+        background: #ffffff !important;
+        border-color: transparent !important;
         border-radius: 6px;
     }
-    [data-testid="stSidebar"] [data-baseweb="select"] *,
+    [data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"],
+    [data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] *,
+    [data-testid="stSidebar"] [data-testid="stMultiSelect"] [data-baseweb="select"],
+    [data-testid="stSidebar"] [data-testid="stMultiSelect"] [data-baseweb="select"] *,
+    [data-testid="stSidebar"] [data-baseweb="input"],
     [data-testid="stSidebar"] [data-baseweb="input"] * {
-        color: #14283d;
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
+        caret-color: #000000 !important;
+        text-shadow: none !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] svg,
+    [data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] svg path,
+    [data-testid="stSidebar"] [data-testid="stMultiSelect"] [data-baseweb="select"] svg,
+    [data-testid="stSidebar"] [data-testid="stMultiSelect"] [data-baseweb="select"] svg path {
+        color: #000000 !important;
+        fill: #000000 !important;
+    }
+    [data-testid="stSidebar"] input::placeholder {
+        color: #4b5563 !important;
+        -webkit-text-fill-color: #4b5563 !important;
+        opacity: 1 !important;
     }
     h2, h3 {
         color: #153b5c;
@@ -1060,11 +1087,24 @@ with st.expander("News fetch diagnostics", expanded=not headline_dicts):
                 st.code(d["error"], language="text")
 
 if not headline_dicts:
-    st.warning(
-        "No headlines found. Common causes: (1) free sources returned nothing for "
-        "the date range, (2) none of the returned articles mentioned the company "
-        "by name, (3) network / rate-limit failure - see diagnostics above."
+    temporary_outage = any(
+        d.get("http_status") in {429, 503}
+        or "rate-limit" in d.get("error", "").lower()
+        or "temporarily" in d.get("error", "").lower()
+        for d in fetch_diagnostics
     )
+    if temporary_outage:
+        st.warning(
+            "The free news sources are temporarily throttling requests for this "
+            "company change. Wait about one minute, then click **Fetch latest data** "
+            "again. The price panel still works independently."
+        )
+    else:
+        st.warning(
+            "No headlines found. Common causes: (1) free sources returned nothing for "
+            "the date range, (2) none of the returned articles mentioned the company "
+            "by name, (3) network / rate-limit failure - see diagnostics above."
+        )
     st.stop()
 
 st.caption(f"Fetched **{len(headline_dicts)}** unique headline(s) mentioning **{company['name']}**.")

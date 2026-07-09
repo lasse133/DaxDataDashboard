@@ -1,39 +1,41 @@
-# DAX 40 Audit Risk Radar Use Case Diagram
-
-This diagram shows the external analyst and the dashboard boundary. The actor is outside the system boundary; the use cases are inside it.
+# DAX 40 Data Dashboard Use Case Diagram
 
 ```mermaid
 flowchart LR
-    analyst([Engagement team / audit analyst])
+    auditor["Audit analyst"]
 
-    subgraph boundary["DAX 40 Audit Risk Radar system boundary"]
+    subgraph dashboard["DAX 40 data dashboard"]
         direction TB
-        select((Select company))
-        period((Select reporting period))
-        fetch((Fetch latest news))
-        score((Score and tag headlines))
-        radar((View risk radar))
-        review((Review risk signals and warnings))
-        implications((Inspect article implications))
-        prices((View stock prices))
-        clear((Clear cached headlines))
+        UC01(["Select a DAX 40 company."])
+        UC02(["Select a year."])
+        UC03(["Select reporting period<br/>one or more quarters."])
+        UC04(["Fetch latest company-related articles."])
+        UC05(["Review fetched articles, sentiment,<br/>topic scores, risk flags, audit references<br/>and suggested procedures."])
+        UC06(["Apply a filter to the articles."])
+        UC07(["View stock price graph."])
+        UC08(["Change the stock price window to &quot;custom&quot;<br/>if needed."])
+        UC09(["Download JSON snapshot."])
+        UC10(["Download PDF workpaper."])
+        UC11(["Clear cached results and start a new run."])
     end
 
-    analyst --> select
-    analyst --> period
-    analyst --> fetch
-    analyst --> radar
-    analyst --> review
-    analyst --> implications
-    analyst --> prices
-    analyst --> clear
+    auditor --- UC01
+    auditor --- UC02
+    auditor --- UC03
+    auditor --- UC04
+    auditor --- UC05
+    auditor --- UC06
+    auditor --- UC07
+    auditor --- UC08
+    auditor --- UC09
+    auditor --- UC10
+    auditor --- UC11
 
-    select -.->|part of selection| fetch
-    period -.->|part of selection| fetch
-    fetch -.->|include| score
-    score -.->|feeds| radar
-    radar -.->|supports| review
-    score -.->|produces| review
-    score -.->|produces| implications
-    fetch -.->|uses| prices
+    classDef actor fill:#ffffff,stroke:#000,stroke-width:1px,color:#000;
+    classDef usecase fill:#9dccdd,stroke:#9dccdd,stroke-width:1px,color:#000;
+    classDef boundary fill:#e1f0fa,stroke:#9dccdd,stroke-width:1px,color:#000;
+
+    class auditor actor;
+    class UC01,UC02,UC03,UC04,UC05,UC06,UC07,UC08,UC09,UC10,UC11 usecase;
+    class dashboard boundary;
 ```

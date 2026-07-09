@@ -46,6 +46,7 @@ _UA = (
 # We enforce a minimum spacing between calls process-wide via a lock.
 _GDELT_MIN_INTERVAL_S = 5.0
 _gdelt_last_call_ts: float = 0.0
+_gdelt_cooldown_until_ts: float = 0.0
 _gdelt_lock = threading.Lock()
 
 
@@ -156,6 +157,17 @@ def fetch_gdelt(
     filter is applied AFTER fetch anyway.
     """
     rep = report or FetchReport(provider="gdelt", ok=False)
+    global _gdelt_cooldown_until_ts
+
+    cooldown_remaining = _gdelt_cooldown_until_ts - time.monotonic()
+    if cooldown_remaining > 0:
+        rep.ok = False
+        rep.http_status = 429
+        rep.error = (
+            "GDELT is temporarily rate-limited. "
+            f"Try again in {int(cooldown_remaining) + 1} seconds."
+        )
+        return []
 
     if start is None or end is None:
         if quarter is None:
@@ -193,6 +205,7 @@ def fetch_gdelt(
                     time.sleep(backoff)
                     backoff *= 2
                     continue
+                _gdelt_cooldown_until_ts = time.monotonic() + 60
                 rep.ok = False
                 rep.error = last_err + " — GDELT throttled; try again in a minute."
                 return []
@@ -253,6 +266,31 @@ def _google_rss_url(query: str, lang: str) -> str:
     )
 
 
+def _get_google_rss_content(url: str, report: FetchReport) -> bytes:
+    """Fetch Google RSS with a small retry for temporary 429/503 responses."""
+    max_attempts = 2
+    backoff = 2.0
+    last_error = ""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.get(url, headers={"User-Agent": _UA}, timeout=20)
+            report.http_status = response.status_code
+            if response.status_code in {429, 503} and attempt < max_attempts:
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            response.raise_for_status()
+            return response.content
+        except requests.RequestException as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            if attempt < max_attempts:
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            raise requests.RequestException(last_error) from exc
+    raise requests.RequestException(last_error or "Google RSS request failed")
+
+
 def fetch_google_rss(
     company: dict,
     quarter: Quarter,
@@ -273,9 +311,7 @@ def fetch_google_rss(
     for lang in ("en", "de"):
         url = _google_rss_url(query, lang)
         try:
-            r = requests.get(url, headers={"User-Agent": _UA}, timeout=20)
-            r.raise_for_status()
-            feed = feedparser.parse(r.content)
+            feed = feedparser.parse(_get_google_rss_content(url, rep))
         except requests.RequestException as e:
             errors.append(f"{lang}: {type(e).__name__}: {e}")
             continue
@@ -332,9 +368,7 @@ def fetch_google_recent(
     for lang in ("en", "de"):
         url = _google_rss_url(query, lang)
         try:
-            r = requests.get(url, headers={"User-Agent": _UA}, timeout=20)
-            r.raise_for_status()
-            feed = feedparser.parse(r.content)
+            feed = feedparser.parse(_get_google_rss_content(url, rep))
         except requests.RequestException as e:
             errors.append(f"{lang}: {type(e).__name__}: {e}")
             continue
@@ -400,9 +434,7 @@ def fetch_company_channel_recent(
         for lang in ("en", "de"):
             url = _google_rss_url(query, lang)
             try:
-                r = requests.get(url, headers={"User-Agent": _UA}, timeout=20)
-                r.raise_for_status()
-                feed = feedparser.parse(r.content)
+                feed = feedparser.parse(_get_google_rss_content(url, rep))
             except requests.RequestException as e:
                 errors.append(f"{lang}: {type(e).__name__}: {e}")
                 continue
@@ -534,6 +566,8 @@ def fetch_headlines_multi(
         google_q = fetch_google_rss(company, Quarter(year=year, q=q), report=per_q_rep)
         rep_google.n_raw += per_q_rep.n_raw
         rep_google.ok = rep_google.ok and per_q_rep.ok
+        if per_q_rep.http_status and (not rep_google.http_status or per_q_rep.http_status >= 400):
+            rep_google.http_status = per_q_rep.http_status
         if per_q_rep.error and per_q_rep.error not in rep_google.error:
             rep_google.error = (rep_google.error + " | " + per_q_rep.error).strip(" |")
         google_kept.extend(h for h in google_q if _mentions_company(h.title, aliases))
