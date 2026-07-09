@@ -1,177 +1,61 @@
 # Data Flow Diagram
 
-End-to-end data flow of the DAX 40 Audit Risk Radar, from user click to
-rendered risk flag. All diagrams are Mermaid — GitHub, VS Code, and most
-Markdown viewers render them inline.
+How data moves through the DAX 40 Audit Risk Radar: from external sources,
+through the transforming processes, to the auditor. Every arrow is labeled
+with the **data** that moves (nouns); the actions live inside the numbered
+processes. Control flow (loops, buttons, ordering) is intentionally
+omitted — for structure see [`component-diagram.md`](component-diagram.md).
 
----
+## Legend
 
-## 1. High-level system view
+| Notation | Meaning |
+|---|---|
+| ⚪ Square, dashed border | **External entity** — source or sink of data |
+| 🟢 Rounded, numbered | **Process** — transforms inputs into different outputs |
+| 🟠 Cylinder | **Data store** — data at rest between processes |
+| Labeled arrow | **Data flow** — the named data that moves |
 
-```mermaid
-flowchart TB
-    subgraph User["👤 Auditor"]
-        UI_ACT["Select ticker, year, quarters<br/>Click 🔄 Fetch"]
-    end
-
-    subgraph StreamlitApp["Streamlit App (app.py)"]
-        SIDEBAR["Sidebar controls"]
-        PRICE_PANEL["Price panel + KPI row"]
-        NEWS_PANEL["News table (streamed rows)"]
-        RISK_PANEL["Risk radar chart + drill-downs"]
-        SNAPSHOT["JSON snapshot export"]
-    end
-
-    subgraph Services["Services (services/*)"]
-        PRICES["prices.py<br/>yfinance wrapper"]
-        NEWS["news.py<br/>GDELT + Google RSS<br/>+ dedupe + filter"]
-        NLP["nlp.py<br/>translate → sentiment + topics"]
-        RISK["risk.py<br/>YAML rule engine"]
-    end
-
-    subgraph Domain["Domain data (domain/*.yaml)"]
-        ALIASES[("company_aliases.yaml<br/>39 DAX tickers")]
-        RULES[("isa315_map.yaml<br/>11 audit rules")]
-    end
-
-    subgraph External["External sources (free, no key)"]
-        YAHOO["Yahoo Finance API"]
-        GDELT["GDELT DOC 2.0 API"]
-        GRSS["Google News RSS"]
-        HF["HuggingFace Model Hub<br/>(first-run download)"]
-    end
-
-    UI_ACT --> SIDEBAR
-    SIDEBAR --> PRICES
-    SIDEBAR --> NEWS
-    PRICES --> YAHOO
-    PRICES --> PRICE_PANEL
-    NEWS --> GDELT
-    NEWS --> GRSS
-    NEWS --> ALIASES
-    NEWS --> NEWS_PANEL
-    NEWS_PANEL --> NLP
-    NLP --> HF
-    NLP --> RISK
-    RISK --> RULES
-    RISK --> NEWS_PANEL
-    RISK --> RISK_PANEL
-    NEWS_PANEL --> SNAPSHOT
-    RISK_PANEL --> SNAPSHOT
-```
-
----
-
-## 2. Per-headline processing pipeline
-
-The streaming pipeline. One headline flows through these stages per
-`st.rerun()`; the app processes exactly one row per script pass so that
-Pause / Resume buttons remain responsive.
+## Diagram
 
 ```mermaid
+---
+<!-- config:
+  layout: fixed -->
+---
 flowchart LR
-    QUEUE([session_state.queue]) --> POP["Pop next headline"]
-    POP --> LANG["Language detect<br/>(langdetect, seeded)"]
-    LANG -->|de| TRANS["Translate DE→EN<br/>MarianMT ~74M"]
-    LANG -->|en| PASS[/pass-through/]
-    TRANS --> SENT["Sentiment<br/>FinBERT ~110M"]
-    PASS --> SENT
-    TRANS --> TOPICS["Zero-shot topics<br/>DeBERTa-v3-MNLI ~184M"]
-    PASS --> TOPICS
-    SENT --> ANALYSIS[[Analysis object]]
-    TOPICS --> ANALYSIS
-    ANALYSIS --> MAPPER["Rule engine<br/>(risk.py)"]
-    MAPPER --> RULES[("isa315_map.yaml")]
-    MAPPER --> FLAGS[[RiskFlag list]]
-    ANALYSIS --> RESULTS([session_state.results])
-    FLAGS --> RESULTS
-    RESULTS --> RERUN["st.rerun()<br/>→ process next"]
-    RERUN --> QUEUE
+    AUDITOR["👤 Auditor"] -- company + period --> P1(["1.0 Fetch & filter news"])
+    NEWSAPI["GDELT +<br>Google News RSS"] -- raw headlines --> P1
+    D2[("D2 · isa315_map.yaml")] -- ISA 315 rules --> P3(["3.0 Analyze &amp; flag risks<br>sentiment · topics · rules"])
+    YAHOO["Yahoo Finance"] -- daily prices --> P2(["2.0 Fetch prices"])
+    P2 -- price KPIs --> P4(["4.0 Render & export"])
+    P4 -- export (JSON/PDF) --> AUDITOR_OUT["👤 Auditor *"]
+    P1 -- filtered headlines --> P3
+    P3 -- results + flags --> P4
+
+     AUDITOR:::actor
+     P1:::process
+     NEWSAPI:::entity
+     D2:::store
+     P3:::process
+     YAHOO:::entity
+     P2:::process
+     P4:::process
+     AUDITOR_OUT:::actor
+    classDef process fill:#0e8a761a,stroke:#0e8a76,color:#1c232d
+    classDef store fill:#a97a1a1f,stroke:#a97a1a,color:#1c232d
+    classDef entity fill:#66707d14,stroke:#66707d,stroke-dasharray:5 3,color:#1c232d
+    classDef actor fill:#ffffff,stroke:#1c232d,color:#1c232d
 ```
 
-Cache boundaries around this pipeline (all in `app.py`):
+\* The Auditor appears twice — as data source (left) and data sink (right).
+Duplicating an external entity to keep flows from crossing the diagram is
+standard DFD practice; the asterisk marks the duplicate.
 
-- `@st.cache_resource` on `load_models()` — transformers loaded once per
-  Streamlit process
-- `@st.cache_data` on `cached_analyze(title, hint, topics_key)` — same
-  headline text always yields the same output; the cache lets a Reset skip
-  redundant re-inference
+## Process descriptions
 
----
-
-## 3. News fetch flow
-
-Details of how a click on **Fetch latest data** turns into a headline
-list. The multi-quarter path collapses GDELT into a single API call to
-stay under its rate limit.
-
-```mermaid
-flowchart TB
-    START(["🔄 Fetch clicked"]) --> BUMP["Bump refresh_nonce<br/>Clear caches"]
-    BUMP --> MULTI["news.fetch_headlines_multi<br/>(ticker, year, quarters)"]
-    MULTI --> WIDE["Compute period_start / period_end<br/>= min(Qs).start → max(Qs).end"]
-    WIDE --> GDELT_CALL{"GDELT call<br/>throttled ≥5s"}
-    GDELT_CALL -->|"HTTP 200"| GDELT_PARSE["Parse JSON<br/>Build Headline objects"]
-    GDELT_CALL -->|"HTTP 429"| BACKOFF["Backoff 3s → 6s → 12s<br/>(3 attempts)"]
-    BACKOFF --> GDELT_CALL
-    GDELT_CALL -->|"Non-JSON / net error"| DIAG_ERR["Record error in FetchReport"]
-
-    MULTI --> LOOP_Q["For each selected quarter"]
-    LOOP_Q --> RSS_EN["Google RSS · en-US"]
-    LOOP_Q --> RSS_DE["Google RSS · de-DE"]
-    RSS_EN --> RSS_PARSE["Parse feed<br/>Filter to quarter window"]
-    RSS_DE --> RSS_PARSE
-
-    GDELT_PARSE --> MERGE["Merge headline lists"]
-    RSS_PARSE --> MERGE
-    MERGE --> FILTER["Filter: title mentions<br/>any company alias"]
-    FILTER --> ALIAS_YAML[("company_aliases.yaml")]
-    FILTER --> DEDUPE["Dedupe by fuzzy title match<br/>(rapidfuzz ≥ 88)"]
-    DEDUPE --> SORTED["Sort newest-first"]
-    SORTED --> QUARTER_STAMP["Bucket each headline<br/>into its actual quarter"]
-    QUARTER_STAMP --> OUT([List of Headline dicts])
-    DIAG_ERR --> DIAG_UI["Diagnostics expander<br/>in UI"]
-```
-
----
-
-## 4. State transitions during processing
-
-How `st.session_state` evolves while the pipeline runs. Every rerun of the
-Streamlit script inspects this state, processes at most one headline, and
-triggers the next rerun.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Empty: page load
-    Empty --> Fetching: click 🔄 Fetch
-    Fetching --> Priming: headlines returned, signature stored
-    Fetching --> Empty: 0 headlines (show diagnostics)
-    Priming --> Processing: queue populated
-    Processing --> Processing: process 1 headline / rerun
-    Processing --> Paused: click ⏸ Pause
-    Paused --> Processing: click ▶ Resume
-    Processing --> Done: queue empty
-    Paused --> Priming: click ↺ Reset
-    Done --> Priming: click ↺ Reset
-    Done --> Fetching: click 🔄 Fetch again
-    Paused --> Fetching: click 🔄 Fetch again
-```
-
----
-
-## 5. Snapshot export flow
-
-A workpaper artifact — everything an auditor would need to reproduce the
-current view offline.
-
-```mermaid
-flowchart LR
-    RESULTS[/session_state.results/] --> BUILD["Build snapshot dict"]
-    COMPANY[/ticker + aliases/] --> BUILD
-    PRICE_SUMMARY[/price summary KPIs/] --> BUILD
-    PERIOD[/year + quarters/] --> BUILD
-    MODEL_REG[/MODELS registry<br/>services.nlp.MODELS/] --> BUILD
-    BUILD --> JSON["Serialize to JSON<br/>(indent=2)"]
-    JSON --> DOWNLOAD["⬇️ Download button<br/>Filename: TICKER_YEAR_Q1-Q2-..._snapshot.json"]
-```
+| # | Process | Transformation |
+|---|---|---|
+| 1.0 | Fetch & filter news | Raw headlines → company-filtered, deduped headline list |
+| 2.0 | Fetch prices | Daily OHLC prices → price KPIs |
+| 3.0 | Analyze & flag risks | Headline → translated + sentiment + topics → risk flags with ISA 315 references |
+| 4.0 | Render & export | Results + price KPIs → risk radar dashboard and JSON/PDF workpaper |
