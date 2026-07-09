@@ -1,229 +1,174 @@
 # ISA 315 Risk Rule Catalog
-#
-# Purpose:
-#   Maps NLP output (zero-shot topics + FinBERT sentiment) to audit-relevant
-#   risks with concrete standard references. Consumed by services/risk_mapper.py
-#   as a pure function: (nlp_output) -> list[RiskFlag].
-#
-# Design:
-#   - Rules-as-data (this file), so audit partners can review WITHOUT reading code.
-#   - Each rule fires when ALL `triggers` are satisfied.
-#   - `topics` are the labels passed to the zero-shot classifier. The classifier
-#     must be given the FULL union of topics from this file at inference time.
-#   - `sentiment` is optional; when present, the FinBERT label must match AND the
-#     score must exceed `sentiment_threshold`.
-#   - `severity` drives the risk radar color: low=yellow, medium=orange, high=red.
-#
-# References used:
-#   ISA 315 (Revised 2019) — Identifying and Assessing Risks of Material Misstatement
-#   ISA 240 — Auditor's Responsibilities Relating to Fraud
-#   ISA 250 — Consideration of Laws and Regulations
-#   ISA 501 — Audit Evidence, Specific Considerations for Selected Items (Litigation)
-#   ISA 540 — Auditing Accounting Estimates
-#   ISA 550 — Related Parties
-#   ISA 560 — Subsequent Events
-#   ISA 570 — Going Concern
-#   ISA 600 — Special Considerations — Group Audits
-#   IDW PS (Prüfungsstandards) — German-specific counterparts, cited where they apply.
-#
-# DISCLAIMER: This catalog SUPPORTS the auditor's professional judgment.
-# It does not perform the ISA 315 risk assessment. All flags require human review.
+# Rules require a zero-shot topic match, optional headline evidence keywords,
+# and an optional sentiment gate.
 
 - id: R-GC-01
   category: Going Concern
   severity: high
   triggers:
     topics: [going concern, liquidity crisis, covenant breach, bankruptcy risk]
+    keywords: [going concern, liquidity, covenant, breach, bankruptcy, insolvent, default, cash-flow, cash flow, zahlungsunfaehig, insolvenz]
     sentiment: negative
     sentiment_threshold: 0.70
   audit_ref:
     isa: [ISA 570, ISA 570.10, ISA 570.16]
     idw: [IDW PS 270]
-  description: >
-    Indicators of substantial doubt about the entity's ability to continue as a
-    going concern for at least twelve months from the balance sheet date.
+  description: Indicators of substantial doubt about the entity's ability to continue as a going concern.
   procedures:
     - Review management's cash-flow forecasts and underlying assumptions
     - Confirm covenant compliance with lenders and review waiver terms
-    - Extend subsequent-events review through the date of the auditor's report
-    - Evaluate adequacy of going-concern disclosures in the notes
+    - Evaluate adequacy of going-concern disclosures
 
 - id: R-FRD-01
   category: Fraud Risk
   severity: high
   triggers:
     topics: [fraud allegation, accounting fraud, financial misstatement, whistleblower]
+    keywords: [fraud, allegation, accounting fraud, misstatement, whistleblower, manipulation, investigation, bilanzbetrug, betrug, hinweisgeber]
   audit_ref:
-    isa: [ISA 240, "ISA 240.32-33"]
+    isa: [ISA 240, ISA 240.32-33]
     idw: [IDW PS 210]
-  description: >
-    Allegations, investigations, or admissions of fraud involving management,
-    those charged with governance, or employees in positions with significant
-    influence over financial reporting.
+  description: Allegations or evidence of fraud affecting financial reporting.
   procedures:
     - Discuss with the audit committee and forensic accounting where applicable
-    - Reassess fraud-risk factors and revise risk-of-material-misstatement assessment
-    - Consider expanding sample sizes for revenue and journal-entry testing
-    - Evaluate whether the auditor should withdraw or modify the engagement
+    - Reassess fraud-risk factors and revise the risk assessment
+    - Expand journal-entry and revenue testing where appropriate
 
 - id: R-LIT-01
   category: Litigation & Claims
   severity: medium
   triggers:
     topics: [lawsuit, class action, arbitration, court ruling]
+    keywords: [lawsuit, litigation, claim, court, ruling, arbitration, class action, legal dispute, klage, gericht, urteil, rechtsstreit]
   audit_ref:
-    isa: [ISA 501, "ISA 501.9-12"]
+    isa: [ISA 501, ISA 501.9-12]
     idw: [IDW PS 302]
-  description: >
-    Pending or threatened litigation or claims that could result in a material
-    contingent liability requiring recognition or disclosure under IAS 37.
+  description: Litigation or claims that may require recognition or disclosure.
   procedures:
     - Obtain external legal-counsel letters for significant matters
-    - Review board and audit-committee minutes for undisclosed claims
-    - Evaluate IAS 37 provision vs. contingent-liability classification
-    - Assess adequacy of disclosures in the financial statements
+    - Evaluate IAS 37 provision versus contingent-liability classification
+    - Assess adequacy of disclosures
 
 - id: R-REG-01
   category: Regulatory & Compliance
   severity: medium
   triggers:
     topics: [regulatory fine, sanctions violation, antitrust investigation, tax investigation]
+    keywords: [regulatory, regulator, fine, penalty, sanctions, antitrust, cartel, tax investigation, compliance, busse, strafe, kartell, steuerpruefung]
   audit_ref:
-    isa: [ISA 250, "ISA 250.14-17"]
+    isa: [ISA 250, ISA 250.14-17]
     idw: [IDW PS 201]
-  description: >
-    Non-compliance with laws and regulations that could result in fines,
-    penalties, license loss, or other material consequences.
+  description: Non-compliance that could result in material fines, penalties, or other consequences.
   procedures:
-    - Inquire of management and legal counsel about ongoing investigations
-    - Evaluate IAS 37 provision for expected fines/penalties
-    - Consider reporting obligations under local law (e.g., § 321 HGB in Germany)
-    - Assess control implications for BSA/AML, GDPR, or export-control matters
+    - Inquire about ongoing investigations
+    - Evaluate provisions for expected fines or penalties
+    - Assess control and reporting implications
 
 - id: R-MA-01
   category: Business Combinations
   severity: medium
   triggers:
     topics: [acquisition, merger, divestiture, spin-off]
+    keywords: [acquisition, acquire, merger, divestiture, spin-off, takeover, sale of, buyout, uebernahme, fusion, abspaltung, verkauf]
   audit_ref:
     isa: [ISA 540, ISA 600]
     idw: [IDW PS 314]
-  description: >
-    Announced or completed M&A activity giving rise to fair-value measurement,
-    goodwill recognition, purchase-price allocation, or scope-of-consolidation
-    changes with significant audit judgment.
+  description: M&A activity involving valuation, goodwill, purchase-price allocation, or consolidation judgments.
   procedures:
-    - Review purchase-price allocation and valuation-specialist reports
-    - Test the goodwill-impairment model and CGU identification
-    - Evaluate group-audit scoping implications under ISA 600
-    - Confirm accounting treatment under IFRS 3 vs. common-control alternatives
+    - Review purchase-price allocation and valuation reports
+    - Test the goodwill-impairment model
+    - Evaluate group-audit scoping implications
 
 - id: R-IMP-01
   category: Asset Impairment
   severity: medium
   triggers:
     topics: [goodwill impairment, asset write-down, restructuring charge, plant closure]
+    keywords: [impairment, write-down, writedown, restructuring, plant closure, goodwill, closure, abschreibung, wertminderung, restrukturierung, werksschliessung]
     sentiment: negative
     sentiment_threshold: 0.60
   audit_ref:
-    isa: [ISA 540, "ISA 540.13"]
+    isa: [ISA 540, ISA 540.13]
     idw: [IDW PS 314]
-  description: >
-    Indicators of impairment for goodwill, intangible assets, PP&E, or investments
-    under IAS 36, or significant restructuring provisions under IAS 37.
+  description: Indicators of impairment or significant restructuring provisions.
   procedures:
-    - Challenge management's CGU identification and value-in-use assumptions
-    - Involve valuation specialists for discount rate and terminal growth
-    - Assess timing recognition of restructuring provisions (constructive obligation)
-    - Review disclosures of sensitivity analysis in the notes
+    - Challenge CGU identification and value-in-use assumptions
+    - Involve valuation specialists where needed
+    - Review sensitivity disclosures
 
 - id: R-REV-01
   category: Revenue Recognition
   severity: high
   triggers:
     topics: [revenue restatement, channel stuffing, sales manipulation, revenue recognition concerns]
+    keywords: [revenue restatement, restatement, channel stuffing, sales manipulation, revenue recognition, accounting issue, ifrs 15, umsatz, erloes, bilanzierung]
   audit_ref:
-    isa: [ISA 240, "ISA 240.26"]
+    isa: [ISA 240, ISA 240.26]
     idw: [IDW PS 210]
-  description: >
-    Presumed significant risk of fraud in revenue recognition per ISA 240.
-    Elevated when news mentions restatement, channel practices, or performance-
-    obligation disputes.
+  description: Elevated revenue-recognition risk involving restatement, manipulation, or accounting concerns.
   procedures:
-    - Perform detailed cut-off testing at quarter-end
-    - Analyze revenue journal entries for unusual patterns (Benford, weekend postings)
-    - Confirm significant contracts with customers, including modification history
-    - Evaluate IFRS 15 five-step application for complex arrangements
+    - Perform detailed cut-off testing
+    - Analyze unusual revenue journal entries
+    - Test significant customer contracts
 
 - id: R-RPT-01
   category: Related Parties
   severity: medium
   triggers:
     topics: [related party transaction, insider dealing, self-dealing]
+    keywords: [related party, insider, self-dealing, board member, shareholder transaction, nahe stehende, nahestehende, insiderhandel]
   audit_ref:
     isa: [ISA 550]
     idw: [IDW PS 255]
-  description: >
-    Transactions with related parties (board members, significant shareholders,
-    subsidiaries) that may be outside the normal course of business or on
-    non-arm's-length terms.
+  description: Related-party transactions that may be undisclosed or outside the normal course of business.
   procedures:
-    - Obtain and update the complete list of related parties
+    - Update the complete list of related parties
     - Test unusual transactions against arm's-length benchmarks
-    - Review board minutes for undisclosed related-party arrangements
-    - Assess adequacy of IAS 24 disclosures
+    - Assess IAS 24 disclosures
 
 - id: R-MGT-01
   category: Governance & Turnover
   severity: medium
   triggers:
     topics: [CEO resignation, CFO departure, auditor change, audit committee resignation]
+    keywords: [ceo resign, cfo depart, resignation, steps down, auditor change, audit committee, ruecktritt, vorstand, finanzvorstand, wirtschaftsprueferwechsel]
   audit_ref:
-    isa: [ISA 240, "ISA 240.A25"]
+    isa: [ISA 240, ISA 240.A25]
     idw: [IDW PS 210]
-  description: >
-    Abrupt turnover of the CEO, CFO, chief accounting officer, or audit-committee
-    members is a fraud-risk indicator under ISA 240, particularly when unexplained
-    or near financial-reporting deadlines.
+  description: Turnover in key management, finance, audit, or governance roles.
   procedures:
-    - Understand the reason for departure through inquiry and public filings
-    - Reassess the tone at the top and fraud-risk factors
-    - Consider expanded procedures on management-override controls
-    - Confirm continuity of key control operators through the reporting period
+    - Understand the reason for departure
+    - Reassess tone at the top and fraud-risk factors
+    - Consider expanded management-override procedures
 
 - id: R-CYB-01
   category: Cybersecurity & IT
   severity: medium
   triggers:
     topics: [data breach, ransomware, cyberattack, IT outage]
+    keywords: [data breach, ransomware, cyberattack, cyber attack, it outage, hack, hacked, datenleck, cyberangriff, ausfall]
   audit_ref:
     isa: [ISA 315, ISA 330]
     idw: [IDW PS 330, IDW PS 951]
-  description: >
-    Cyber incidents that may result in material contingent liabilities (GDPR
-    fines, customer claims), impaired IT general controls, or business
-    interruption affecting financial reporting.
+  description: Cyber incidents affecting IT controls, reporting systems, liabilities, or business continuity.
   procedures:
-    - Assess impact on IT general controls and reliance on system-generated reports
-    - Evaluate provisions/contingencies for regulatory fines and customer claims
-    - Review adequacy of subsequent-event and risk disclosures
-    - Involve IT audit specialists to re-scope ITGC testing
+    - Assess impact on IT general controls
+    - Evaluate provisions and disclosures
+    - Re-scope IT audit testing where needed
 
 - id: R-SUB-01
   category: Subsequent Events
   severity: low
   triggers:
     topics: [profit warning, dividend cut, guidance withdrawal]
+    keywords: [profit warning, dividend cut, guidance withdrawal, outlook cut, forecast cut, gewinnwarnung, dividendenkuerzung, prognose gesenkt]
     sentiment: negative
     sentiment_threshold: 0.60
   audit_ref:
     isa: [ISA 560]
     idw: [IDW PS 203]
-  description: >
-    Post-balance-sheet events that may require adjustment (Type 1) or
-    disclosure (Type 2) in the financial statements.
+  description: Post-balance-sheet events that may require adjustment or disclosure.
   procedures:
-    - Classify the event as adjusting vs. non-adjusting under IAS 10
-    - Obtain updated management representations covering the event date
-    - Evaluate adequacy of disclosure in the notes
-    - Reassess going-concern conclusion if event is severe
+    - Classify the event as adjusting or non-adjusting
+    - Extend subsequent-events review
+    - Evaluate related disclosures

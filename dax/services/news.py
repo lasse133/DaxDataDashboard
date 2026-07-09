@@ -24,7 +24,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -312,6 +312,133 @@ def fetch_google_rss(
     return out
 
 
+def fetch_google_recent(
+    company: dict,
+    days: int = 7,
+    max_records: int = 80,
+    report: FetchReport | None = None,
+) -> list[Headline]:
+    """Fetch recent Google News RSS headlines for a company.
+
+    This is intentionally Google-only and date-filtered client-side. It powers
+    the "Current news" screen where speed matters more than historical depth.
+    """
+    rep = report or FetchReport(provider="google_recent", ok=False)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    query = f'"{company["name"]}"'
+    out: list[Headline] = []
+    errors: list[str] = []
+
+    for lang in ("en", "de"):
+        url = _google_rss_url(query, lang)
+        try:
+            r = requests.get(url, headers={"User-Agent": _UA}, timeout=20)
+            r.raise_for_status()
+            feed = feedparser.parse(r.content)
+        except requests.RequestException as e:
+            errors.append(f"{lang}: {type(e).__name__}: {e}")
+            continue
+
+        for entry in feed.entries[:max_records]:
+            pp = getattr(entry, "published_parsed", None)
+            if not pp:
+                continue
+            ts = datetime(*pp[:6], tzinfo=timezone.utc)
+            if ts < cutoff:
+                continue
+            source_info = getattr(entry, "source", None) or {}
+            source_name = source_info.get("title", "") if isinstance(source_info, dict) else ""
+            title = html.unescape((entry.title or "").strip())
+            if not title:
+                continue
+            out.append(
+                Headline(
+                    title=title,
+                    url=entry.link,
+                    source=source_name,
+                    provider="google",
+                    published_at=ts,
+                    language_hint=lang,
+                )
+            )
+
+    if errors and not out:
+        rep.ok = False
+        rep.error = " | ".join(errors)
+    else:
+        rep.ok = True
+    rep.n_raw = len(out)
+    return out
+
+
+def fetch_company_channel_recent(
+    company: dict,
+    days: int = 7,
+    max_records: int = 40,
+    report: FetchReport | None = None,
+) -> list[Headline]:
+    """Fetch recent company-owned or company-controlled communication signals.
+
+    This uses Google News RSS as a discovery layer for press releases, investor
+    relations announcements, and indexed LinkedIn/company-channel posts. It is
+    intentionally conservative: no direct LinkedIn scraping, no login-required
+    pages, and no dependency on a manually maintained domain list.
+    """
+    rep = report or FetchReport(provider="company_channels", ok=False)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    company_name = company["name"]
+    queries = [
+        f'"{company_name}" "press release"',
+        f'"{company_name}" "investor relations"',
+        f'"{company_name}" LinkedIn',
+        f'"{company_name}" "company announcement"',
+    ]
+    out: list[Headline] = []
+    errors: list[str] = []
+
+    for query in queries:
+        for lang in ("en", "de"):
+            url = _google_rss_url(query, lang)
+            try:
+                r = requests.get(url, headers={"User-Agent": _UA}, timeout=20)
+                r.raise_for_status()
+                feed = feedparser.parse(r.content)
+            except requests.RequestException as e:
+                errors.append(f"{lang}: {type(e).__name__}: {e}")
+                continue
+
+            for entry in feed.entries[:max_records]:
+                pp = getattr(entry, "published_parsed", None)
+                if not pp:
+                    continue
+                ts = datetime(*pp[:6], tzinfo=timezone.utc)
+                if ts < cutoff:
+                    continue
+                source_info = getattr(entry, "source", None) or {}
+                source_name = source_info.get("title", "") if isinstance(source_info, dict) else ""
+                title = html.unescape((entry.title or "").strip())
+                if not title:
+                    continue
+                out.append(
+                    Headline(
+                        title=title,
+                        url=entry.link,
+                        source=source_name,
+                        provider="company",
+                        published_at=ts,
+                        language_hint=lang,
+                    )
+                )
+
+    if errors and not out:
+        rep.ok = False
+        rep.error = " | ".join(errors[:4])
+    else:
+        rep.ok = True
+    rep.n_raw = len(out)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Merging: dedupe + company-name filter
 # ---------------------------------------------------------------------------
@@ -419,3 +546,56 @@ def fetch_headlines_multi(
     combined = [*gdelt_kept, *google_kept]
     combined.sort(key=lambda h: h.published_at, reverse=True)
     return _dedupe(combined)
+
+
+def fetch_current_headlines(
+    ticker: str,
+    days: int = 7,
+    include_company_channels: bool = True,
+    diagnostics: list[FetchReport] | None = None,
+) -> list[Headline]:
+    """Return recent, deduped Google RSS headlines for current monitoring."""
+    company = get_company(ticker)
+    aliases = company["aliases"]
+    rep_google = FetchReport(provider="google_recent", ok=False)
+    google = fetch_google_recent(company, days=days, report=rep_google)
+    google_kept = [h for h in google if _mentions_company(h.title, aliases)]
+    rep_google.n_after_filter = len(google_kept)
+    combined = list(google_kept)
+
+    if diagnostics is not None:
+        diagnostics.append(rep_google)
+
+    if include_company_channels:
+        rep_company = FetchReport(provider="company_channels", ok=False)
+        company_channel = fetch_company_channel_recent(
+            company, days=days, report=rep_company
+        )
+        company_kept = [h for h in company_channel if _mentions_company(h.title, aliases)]
+        rep_company.n_after_filter = len(company_kept)
+        combined.extend(company_kept)
+        if diagnostics is not None:
+            diagnostics.append(rep_company)
+
+    combined.sort(key=lambda h: h.published_at, reverse=True)
+    return _dedupe(combined)
+
+
+def fetch_company_channel_headlines(
+    ticker: str,
+    days: int = 7,
+    diagnostics: list[FetchReport] | None = None,
+) -> list[Headline]:
+    """Return only company-owned/channel-style recent headlines."""
+    company = get_company(ticker)
+    aliases = company["aliases"]
+    rep_company = FetchReport(provider="company_channels", ok=False)
+    company_channel = fetch_company_channel_recent(
+        company, days=days, report=rep_company
+    )
+    company_kept = [h for h in company_channel if _mentions_company(h.title, aliases)]
+    rep_company.n_after_filter = len(company_kept)
+    if diagnostics is not None:
+        diagnostics.append(rep_company)
+    company_kept.sort(key=lambda h: h.published_at, reverse=True)
+    return _dedupe(company_kept)

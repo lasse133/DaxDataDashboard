@@ -15,7 +15,7 @@ concrete audit and legal references.
 
 | Requirement | How it is satisfied |
 |---|---|
-| **Distributed / stream processing (Streamlit)** | Headlines flow through a staged pipeline (fetch → language detect → translate → sentiment + topics → risk mapping) executed by a `ThreadPoolExecutor`. Rows appear in the UI **as each headline finishes**, not in one batch — a Streamlit-native streaming dashboard. |
+| **Distributed / stream processing (Streamlit)** | Headlines flow through a staged pipeline (fetch → language detect → translate → sentiment + topics → risk mapping). The app processes one headline per `st.rerun()`, so rows appear incrementally and Pause / Resume controls stay responsive. |
 | **Deep learning** | Three pretrained transformer models used for inference only: MarianMT (translation), FinBERT (financial sentiment), DeBERTa-v3-MNLI (zero-shot topic classification). See the sidebar's "Deep-learning stack" panel. |
 
 ## Data sources (all free, no API key required)
@@ -23,7 +23,25 @@ concrete audit and legal references.
 - **Prices** — Yahoo Finance via `yfinance` (daily OHLC over the selected quarter).
 - **News** — GDELT DOC 2.0 API + Google News RSS (English and German).
 
-## Setup
+## Setup with uv
+
+Install `uv` once if it is not already available:
+
+```bash
+pip install uv
+```
+
+Then run the dashboard from this folder:
+
+```bash
+cd dax
+uv run streamlit run app.py
+```
+
+`uv` creates and manages the virtual environment automatically from
+`pyproject.toml`.
+
+## Setup with plain venv
 
 ```bash
 python -m venv .venv
@@ -38,15 +56,29 @@ HuggingFace and caches them locally. Subsequent runs are fast.
 ## Using the app
 
 1. Pick a DAX 40 company from the sidebar.
-2. Pick a quarter (defaults to the current quarter).
-3. Click **🔄 Fetch latest data**. Headlines are fetched and processed one by
-   one — rows appear in the results table as each finishes.
+2. Choose a workspace:
+   - **Reporting period** for quarter-based audit risk scoring.
+   - **Market news** for fast external-news monitoring without running the ML pipeline.
+   - **Company channels** for company-owned communications such as press
+     releases, investor relations, announcements, and indexed social posts.
+3. In **Reporting period**, pick one or more quarters and click
+   **🔄 Fetch latest data**. Headlines are fetched and processed one by one —
+   rows appear in the results table as each finishes.
+   Stock prices default to year-to-date, from January 1 of the current year to
+   today, and can be changed to a custom historical range in the sidebar.
 4. Review the aggregated **Risk radar** and open any expander to see:
    - the exact deep-learning signals (sentiment score, matched topics),
    - the ISA / IDW paragraphs that apply,
    - suggested audit procedures.
-5. Click **⬇️  Download JSON snapshot** to export a workpaper artifact with
-   every model version, score, and flag for that quarter.
+5. Export the reporting-period workpaper as JSON or PDF. The PDF export is
+   headline-level evidence; it does not summarize full article bodies.
+
+The lightweight news workspaces include keyword search and risk-driver term
+charts for quick auditor scanning.
+
+For a detailed explanation of the risk radar, top-topic scores, and
+high/medium/low flag labels, see
+[`doc/risk-radar-output.md`](doc/risk-radar-output.md).
 
 ## Project layout
 
@@ -54,6 +86,10 @@ HuggingFace and caches them locally. Subsequent runs are fast.
 dax/
 ├── app.py                          # Streamlit UI (thin — presentation only)
 ├── requirements.txt
+├── doc/
+│   ├── data-flow.md                # Mermaid diagrams for the pipeline
+│   ├── design-decisions.md         # Architecture and design rationale
+│   └── risk-radar-output.md        # How to interpret the output
 ├── domain/
 │   ├── company_aliases.yaml        # 40 tickers + name aliases for filtering
 │   └── isa315_map.yaml             # ISA 315 rule catalog (rules-as-data)

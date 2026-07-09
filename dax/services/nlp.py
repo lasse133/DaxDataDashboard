@@ -4,7 +4,7 @@ Three transformer models, inference only:
 
     * Translation (DE -> EN):  Helsinki-NLP/opus-mt-de-en   (MarianMT, ~74M params)
     * Sentiment (EN):          ProsusAI/finbert             (BERT-base, ~110M)
-    * Zero-shot topics (EN):   facebook/bart-large-mnli     (BART-large, ~406M)
+    * Zero-shot topics (EN):   MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli
 
 Design notes
 ------------
@@ -12,9 +12,9 @@ Design notes
   Streamlit callers should wrap that in `@st.cache_resource` (see app.py).
 * Every function is a pure input -> output transformer. No global state
   beyond the model cache.
-* `analyze(...)` is the single-headline pipeline the app calls in parallel
-  via `concurrent.futures`. It returns a dict with all intermediate
-  outputs so the UI can show WHY a headline was flagged, not just the label.
+* `analyze(...)` is the single-headline pipeline the app calls once per
+  Streamlit rerun. It returns a dict with all intermediate outputs so the UI
+  can show WHY a headline was flagged, not just the label.
 """
 
 from __future__ import annotations
@@ -172,9 +172,8 @@ class Analysis:
 def analyze(text: str, topic_labels: list[str], language_hint: str = "") -> Analysis:
     """Run the full deep-learning pipeline on one headline title.
 
-    This is what the app calls concurrently via ThreadPoolExecutor. The
-    ordering (translate -> sentiment + topics) matters: FinBERT and BART-MNLI
-    were trained on English.
+    The ordering (translate -> sentiment + topics) matters: FinBERT and the
+    MNLI zero-shot model were trained on English.
     """
     lang = detect_language(text, hint=language_hint)
     english = translate_de_to_en(text) if lang == "de" else text

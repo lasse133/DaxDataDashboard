@@ -26,3 +26,6 @@ rapidfuzz>=3.9
 # Plotting
 plotly>=5.22
 pandas>=2.2
+
+# PDF export
+reportlab>=4.2

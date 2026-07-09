@@ -1,4 +1,4 @@
-# DAX 40 Audit Risk Radar
+# DAX40 Dashboard
 
 Real-time screening of market and news data to detect risk signals, summarize key
 developments, and support structured audit risk assessment (ISA 315).
@@ -30,7 +30,7 @@ developments, and support structured audit risk assessment (ISA 315).
 flowchart LR
   analyst([Engagement team / audit analyst])
 
-  subgraph boundary["DAX 40 Audit Risk Radar system boundary"]
+  subgraph boundary["DAX40 Dashboard system boundary"]
     direction TB
     select((Select company))
     period((Select reporting period))

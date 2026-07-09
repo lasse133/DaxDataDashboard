@@ -11,6 +11,7 @@ crashing.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 import pandas as pd
 import yfinance as yf
 
@@ -40,6 +41,33 @@ def fetch_prices(ticker: str, quarter: Quarter) -> pd.DataFrame:
 
     # yfinance sometimes returns a MultiIndex on columns when called with a
     # single ticker — flatten it so downstream code can just do df["Close"].
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
+
+
+def fetch_prices_range(ticker: str, start: date, end: date) -> pd.DataFrame:
+    """Daily OHLC for a user-selected date range.
+
+    `end` is inclusive for the app UI; yfinance treats it as exclusive, so the
+    request adds one day.
+    """
+    if end < start:
+        return pd.DataFrame()
+    try:
+        df = yf.download(
+            ticker,
+            start=start.isoformat(),
+            end=(end + timedelta(days=1)).isoformat(),
+            interval="1d",
+            progress=False,
+            auto_adjust=False,
+        )
+    except Exception:
+        return pd.DataFrame()
+
+    if df is None or df.empty:
+        return pd.DataFrame()
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df
