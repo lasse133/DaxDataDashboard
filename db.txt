@@ -1,0 +1,4 @@
+ostgres is deployed and available as srv-captain--dax-db:5432 to other apps.
+For example with Node.js: const client = new Client({ user: 'postgres', host: 'srv-captain--dax-db', database: 'risk_data', password: 'DaxRisk2026!', port: 5432})
+
+postgresql://postgres:DaxRisk2026!@srv-captain--dax-db:5432/risk_data

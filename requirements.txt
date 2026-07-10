@@ -33,3 +33,7 @@ pandas>=2.2
 
 # PDF export
 reportlab>=4.2
+
+# Big Data Architecture - PostgreSQL Connectors
+SQLAlchemy>=2.0.0
+psycopg2-binary>=2.9.9

@@ -428,8 +428,20 @@ def cached_prices_range(
 @st.cache_data(show_spinner=False)
 def cached_analyze(title: str, language_hint: str, topics_key: str) -> dict:
     """Per-headline NLP cache."""
+    
+    # --- Data Cleaning Step ---
+    # Strip the publisher name from the end of the Google News headline
+    if " - " in title:
+        clean_title = title.rsplit(" - ", 1)[0].strip()
+    else:
+        clean_title = title
+    # --------------------------
+
     labels = risk.classification_topic_labels()
-    analysis = nlp.analyze(title, topic_labels=labels, language_hint=language_hint)
+    
+    # Pass the clean_title to the AI models instead of the raw title
+    analysis = nlp.analyze(clean_title, topic_labels=labels, language_hint=language_hint)
+    
     return analysis.as_dict()
 
 
