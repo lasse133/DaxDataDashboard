@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.git/
+.env
+historical_data.csv
+spark_output_summary/
