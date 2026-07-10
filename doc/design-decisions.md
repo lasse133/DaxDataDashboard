@@ -206,7 +206,10 @@ Things we explicitly chose *not* to build for the MVP:
   pretrained inference is enough for a demo.
 - **Multi-user auth / user accounts.** Single-user demo tool.
 - **Persistent database.** All state is in-memory (session) + on-disk
-  YAML. Snapshot export is JSON-per-run.
+  YAML. Snapshot export is JSON-per-run. *Update:* a PostgreSQL service is
+  now provisioned on the CapRover host and the connectors (SQLAlchemy +
+  psycopg2) are in `requirements.txt`, but the app does not use it yet —
+  see §9.
 - **Real distributed stream processor** (Kafka / Spark / Flink). Explicitly
   ruled out for simplicity.
 - **NER model** for company matching. Alias regex is enough.
@@ -214,3 +217,57 @@ Things we explicitly chose *not* to build for the MVP:
 - **UI in German.** English only, per requirements.
 - **All 40 DAX constituents.** Currently 39 — DAX composition drifts
   ~annually; verify before an engagement.
+
+---
+
+## 9. Deployment: Docker + CapRover
+
+### 9.1 Containerized, self-hosted (replaces Streamlit Community Cloud)
+The app now ships as a Docker image (`dockerfile`, base `python:3.12-slim`)
+deployed to a **CapRover** server via `captain-definition`. Reasons over
+Streamlit Community Cloud:
+
+- **No sleep/wake cycle.** Free-tier Streamlit Cloud containers sleep after
+  ~12 h and lose the ~1.5 GB model cache; a self-hosted container stays up.
+- **Room to grow.** CapRover lets us run companion services on the same
+  host — a PostgreSQL instance (`srv-captain--dax-db:5432`, db `risk_data`)
+  is already provisioned for future persistence.
+- **Reproducible builds.** System deps (`build-essential`, `libpq-dev`) are
+  pinned in the image; a Docker `HEALTHCHECK` on `/_stcore/health` lets
+  CapRover detect a dead app.
+
+Trade-off: the model cache still lives inside the container, so every
+redeploy re-downloads the models on first use.
+
+### 9.2 Headline cleaning at fetch time
+Google News RSS titles arrive as `"Headline - Publisher"`. The publisher
+suffix skews sentiment and topic scores, pollutes company-alias filtering
+(publisher names can contain company names), and weakens fuzzy dedupe
+(the same story from two publishers differs only by suffix). So
+`services/news.py` strips the suffix **once, at RSS parse time**, before
+anything downstream sees the title:
+
+- The strip is guarded: it removes `" - {source_name}"` only when the
+  title actually ends with the feed entry's own source name, falling back
+  to splitting on the last `" - "`. Headlines that legitimately contain
+  `" - "` survive intact.
+- GDELT titles are untouched — the suffix convention is Google-specific.
+- The original string is kept as `Headline.title_raw` and flows into the
+  JSON snapshot, preserving traceability to what the source emitted.
+- Side effect: the per-headline NLP cache key is now the clean title, so
+  the same story syndicated by several publishers shares one model run.
+
+An earlier version did this inside `app.py`'s `cached_analyze`, which
+cleaned the text for the models but left filtering, dedupe, display, and
+exports on the raw title.
+
+### 9.3 Translation is scored, and now shown
+`nlp.analyze` has always run FinBERT and the zero-shot classifier on the
+**English** text (MarianMT translates German first — both scoring models
+were trained on English). The translation is now also surfaced where the
+auditor reads results: an "English" column in the results tables (filled
+only for German headlines) and an `EN:` line under German headlines in the
+PDF workpaper. Translation is deliberately **not** used in fetch/filter/
+dedupe or the pre-analysis keyword search — those run before the ML
+pipeline, and translating every raw headline would defeat the lightweight
+paths.

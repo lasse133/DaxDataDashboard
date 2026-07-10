@@ -7,9 +7,10 @@ whom. Arrows point from caller to callee.
 
 | Notation | Meaning |
 |---|---|
-| 🔵 Blue | **Presentation** — Streamlit UI (`app.py`) |
+| 🔵 Blue | **Presentation** — Streamlit UI code in `app.py` |
+| 🟣 Violet | **Data-access & pipeline layer** — cache wrappers in `app.py` |
 | 🟢 Teal | **Service module** — Python module in `services/` |
-| 🟠 Amber cylinder | **Domain data** — YAML files (rules-as-data) |
+| 🟠 Amber cylinder | **Data at rest** — YAML catalogs, session/cache state |
 | ⚪ Grey, dashed border | **External source** — outside the system boundary |
 | `───▶` solid arrow | In-process function call |
 | `╌╌╌▶` dotted arrow | Network I/O or local file read |
@@ -20,11 +21,15 @@ whom. Arrows point from caller to callee.
 flowchart TB
     AUDITOR(["👤 Auditor (browser)"])
 
-    APP["app.py — Streamlit UI<br/>sidebar · price panel · news table · risk radar · export"]
+    subgraph APP["app.py — rerun top-to-bottom on every interaction"]
+        UI["Presentation layer<br/>sidebar · price panel · news table<br/>risk radar · drill-downs · export"]
+        MID["Data-access & pipeline layer<br/>@st.cache_data / @st.cache_resource wrappers:<br/>cached_headlines · cached_prices ·<br/>cached_analyze · load_models"]
+        STATE[("Session & cache state<br/>st.session_state: queue · results · paused<br/>st.cache_data entries")]
+    end
 
     subgraph SVC["services/"]
         PRICES["prices.py<br/>stock prices"]
-        NEWS["news.py<br/>fetch + filter news"]
+        NEWS["news.py<br/>fetch · clean · filter news"]
         NLP["nlp.py<br/>translate · sentiment · topics<br/>(3 pretrained transformers)"]
         RISK["risk.py<br/>ISA 315 rule engine"]
     end
@@ -35,11 +40,14 @@ flowchart TB
     NEWSAPI["GDELT + Google News RSS"]
     HF["HuggingFace Hub<br/>(first run only)"]
 
-    AUDITOR --> APP
-    APP --> PRICES
-    APP --> NEWS
-    APP --> NLP
-    APP --> RISK
+    AUDITOR -->|"HTTPS + WebSocket<br/>(Streamlit server)"| UI
+    UI --> MID
+    UI --> STATE
+    MID --> STATE
+    MID --> PRICES
+    MID --> NEWS
+    MID --> NLP
+    MID --> RISK
 
     NEWS -.-> DOMAIN
     RISK -.-> DOMAIN
@@ -48,21 +56,40 @@ flowchart TB
     NLP -.-> HF
 
     classDef ui fill:#2f6bd81a,stroke:#2f6bd8,color:#1c232d
+    classDef adapter fill:#7a4dd81a,stroke:#7a4dd8,color:#1c232d
     classDef svc fill:#0e8a761a,stroke:#0e8a76,color:#1c232d
     classDef data fill:#a97a1a1f,stroke:#a97a1a,color:#1c232d
     classDef ext fill:#66707d14,stroke:#66707d,stroke-dasharray:5 3,color:#1c232d
     classDef actor fill:#ffffff,stroke:#1c232d,color:#1c232d
 
-    class APP ui
+    class UI ui
+    class MID adapter
     class PRICES,NEWS,NLP,RISK svc
-    class DOMAIN data
+    class DOMAIN,STATE data
     class YAHOO,NEWSAPI,HF ext
     class AUDITOR actor
 ```
 
 ## Notes
 
-- Everything except the bottom row runs in **one Streamlit process**.
+- **Why the middle layer exists:** Streamlit re-executes `app.py` from top
+  to bottom on every user interaction, so the presentation code never calls
+  the service modules directly for expensive work. All network fetches and
+  model inference go through `@st.cache_data` / `@st.cache_resource`
+  wrapper functions (`app.py:280-435`), which return memoized results on
+  reruns; `st.session_state` carries the streaming pipeline (queue,
+  results, paused flag) across reruns.
+- **Exception:** cheap, pure in-memory calls — `risk.evaluate`,
+  `prices.summarize`, and the catalog loaders (`news.load_companies`,
+  `risk.load_rules`) — are invoked from presentation code directly; they
+  are safe and fast to re-run, so caching them would add nothing.
+- Everything except the bottom row runs in **one Streamlit process**
+  (packaged as a Docker container for CapRover — see
+  [`deployment-diagram.md`](deployment-diagram.md)).
+- `news.py` strips the publisher suffix Google News RSS appends
+  (`"Headline - Source"` → `"Headline"`) at parse time, so filtering,
+  dedupe, display, and the models all see the clean headline; the raw
+  title is kept on each `Headline` as `title_raw` for traceability.
 - `nlp.py` wraps three pretrained models (MarianMT, FinBERT,
   DeBERTa-v3-MNLI), downloaded once from HuggingFace and cached locally.
 - Audit rules live in YAML (**rules-as-data**), so `risk.py` stays a thin

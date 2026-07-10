@@ -15,7 +15,7 @@ concrete audit and legal references.
 
 | Requirement | How it is satisfied |
 |---|---|
-| **Distributed / stream processing (Streamlit)** | Headlines flow through a staged pipeline (fetch → language detect → translate → sentiment + topics → risk mapping). The app processes one headline per `st.rerun()`, so rows appear incrementally and Pause / Resume controls stay responsive. |
+| **Distributed / stream processing (Streamlit)** | Headlines flow through a staged pipeline (fetch → clean publisher suffix → language detect → translate → sentiment + topics → risk mapping). The app processes one headline per `st.rerun()`, so rows appear incrementally and Pause / Resume controls stay responsive. |
 | **Deep learning** | Three pretrained transformer models used for inference only: MarianMT (translation), FinBERT (financial sentiment), DeBERTa-v3-MNLI (zero-shot topic classification). See the sidebar's "Deep-learning stack" panel. |
 
 ## Data sources (all free, no API key required)
@@ -52,6 +52,25 @@ streamlit run app.py
 The first run downloads three transformer models (~1.5 GB total) from
 HuggingFace and caches them locally. Subsequent runs are fast.
 
+## Docker / CapRover deployment
+
+The repo ships with a `dockerfile` (Python 3.12-slim, CPU-only torch,
+Streamlit on port 8501 with a `/_stcore/health` healthcheck) and a
+`captain-definition` so it can be deployed to a [CapRover](https://caprover.com)
+server as-is.
+
+Run locally with Docker:
+
+```bash
+docker build -t dax-dashboard .
+docker run -p 8501:8501 dax-dashboard
+```
+
+`requirements.txt` also includes SQLAlchemy and psycopg2 for a PostgreSQL
+service provisioned alongside the app on CapRover
+(`srv-captain--dax-db:5432`); the app itself does not use the database yet —
+see [`doc/deployment-diagram.md`](doc/deployment-diagram.md).
+
 ## Using the app
 
 1. Pick a DAX 40 company from the sidebar.
@@ -85,8 +104,12 @@ high/medium/low flag labels, see
 dax/
 ├── app.py                          # Streamlit UI (thin — presentation only)
 ├── requirements.txt
+├── dockerfile                      # Container image (Python 3.12-slim, port 8501)
+├── captain-definition              # CapRover deploy config (points at dockerfile)
 ├── doc/
+│   ├── component-diagram.md        # Building blocks and dependencies
 │   ├── data-flow.md                # Mermaid diagrams for the pipeline
+│   ├── deployment-diagram.md       # Docker/CapRover physical view
 │   ├── design-decisions.md         # Architecture and design rationale
 │   └── risk-radar-output.md        # How to interpret the output
 ├── domain/
