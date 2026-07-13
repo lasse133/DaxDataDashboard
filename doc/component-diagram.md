@@ -8,7 +8,7 @@ whom. Arrows point from caller to callee.
 | Notation | Meaning |
 |---|---|
 | 🔵 Blue | **Presentation** — Streamlit UI code in `app.py` |
-| 🟣 Violet | **Data-access & pipeline layer** — cache wrappers in `app.py` |
+| 🟣 Violet | **Data-access & pipeline layer** — cache wrappers in `app.py`, batch entry point in `scripts/` |
 | 🟢 Teal | **Service module** — Python module in `services/` |
 | 🟠 Amber cylinder | **Data at rest** — YAML catalogs, session/cache state |
 | ⚪ Grey, dashed border | **External source** — outside the system boundary |
@@ -19,59 +19,54 @@ whom. Arrows point from caller to callee.
 
 ```mermaid
 flowchart TB
-    AUDITOR(["👤 Auditor (browser)"])
-
-    subgraph APP["app.py — rerun top-to-bottom on every interaction"]
-        UI["Presentation layer<br/>sidebar · price panel · news table<br/>risk radar · drill-downs · export"]
-        MID["Data-access & pipeline layer<br/>@st.cache_data / @st.cache_resource wrappers:<br/>cached_headlines · cached_prices ·<br/>cached_analyze · load_models"]
-        STATE[("Session & cache state<br/>st.session_state: queue · results · paused<br/>st.cache_data entries")]
-    end
-
-    subgraph SVC["services/"]
-        PRICES["prices.py<br/>stock prices"]
-        NEWS["news.py<br/>fetch · clean · filter news"]
-        NLP["nlp.py<br/>translate · sentiment · topics<br/>(3 pretrained transformers)"]
-        RISK["risk.py<br/>ISA 315 rule engine"]
-        DB["db.py<br/>PostgreSQL persistence<br/>(optional, read-through cache)"]
-    end
-
-    DOMAIN[("domain/*.yaml<br/>company aliases · 11 ISA 315 rules")]
-    PG[("PostgreSQL risk_data<br/>nlp_cache · headline_cache<br/>(dax-db container, via DATABASE_URL)")]
-
-    YAHOO["Yahoo Finance"]
-    NEWSAPI["GDELT + Google News RSS"]
-    HF["HuggingFace Hub<br/>(first run only)"]
-
-    AUDITOR -->|"HTTPS + WebSocket<br/>(Streamlit server)"| UI
-    UI --> MID
-    UI --> STATE
+ subgraph APP["app.py — rerun top-to-bottom on every interaction"]
+        UI["Presentation layer<br>sidebar · price panel · news table<br>risk radar · drill-downs · export"]
+        MID["Data-access &amp; pipeline layer<br>@st.cache_data / @st.cache_resource wrappers:<br>cached_headlines · cached_prices ·<br>cached_analyze · load_models"]
+        STATE[("Session &amp; cache state<br>st.session_state: queue · results · paused<br>st.cache_data entries")]
+  end
+ subgraph SVC["services/"]
+        PRICES["prices.py<br>stock prices"]
+        NEWS["news.py<br>fetch · clean · filter news"]
+        NLP["nlp.py<br>translate · sentiment · topics<br>(3 pretrained transformers)"]
+        RISK["risk.py<br>ISA 315 rule engine"]
+        DB["db.py<br>PostgreSQL persistence<br>(optional, read-through cache)"]
+  end
+    AUDITOR(["👤 Auditor (browser)"]) -- HTTPS + WebSocket<br>(Streamlit server) --> UI
+    UI --> MID & STATE
+    
+    %% Combined the 5 service lines into 1 pointing directly to the SVC subgraph
     MID --> STATE
-    MID --> PRICES
-    MID --> NEWS
-    MID --> NLP
-    MID --> RISK
-    MID --> DB
+    MID --> SVC
+    
+    PREWARM["scripts/prewarm.py<br>batch pre-warm / nightly update<br>(runs outside the app)"] --> SVC
 
-    DB -.-> PG
-    NEWS -.-> DOMAIN
+    DB -.-> PG[("PostgreSQL risk_data<br>nlp_cache · headline_cache<br>(dax-db container, via DATABASE_URL)")]
+    NEWS -.-> DOMAIN[("domain/*.yaml<br>company aliases · 11 ISA 315 rules")] & NEWSAPI["GDELT + Google News RSS"]
     RISK -.-> DOMAIN
-    PRICES -.-> YAHOO
-    NEWS -.-> NEWSAPI
-    NLP -.-> HF
+    PRICES -.-> YAHOO["Yahoo Finance"]
+    NLP -.-> HF["HuggingFace Hub<br>(first run only)"]
 
+     UI:::ui
+     MID:::adapter
+     PREWARM:::adapter
+     STATE:::data
+     PRICES:::svc
+     NEWS:::svc
+     NLP:::svc
+     RISK:::svc
+     DB:::svc
+     AUDITOR:::actor
+     PG:::data
+     DOMAIN:::data
+     NEWSAPI:::ext
+     YAHOO:::ext
+     HF:::ext
     classDef ui fill:#2f6bd81a,stroke:#2f6bd8,color:#1c232d
     classDef adapter fill:#7a4dd81a,stroke:#7a4dd8,color:#1c232d
     classDef svc fill:#0e8a761a,stroke:#0e8a76,color:#1c232d
     classDef data fill:#a97a1a1f,stroke:#a97a1a,color:#1c232d
     classDef ext fill:#66707d14,stroke:#66707d,stroke-dasharray:5 3,color:#1c232d
     classDef actor fill:#ffffff,stroke:#1c232d,color:#1c232d
-
-    class UI ui
-    class MID adapter
-    class PRICES,NEWS,NLP,RISK,DB svc
-    class DOMAIN,STATE,PG data
-    class YAHOO,NEWSAPI,HF ext
-    class AUDITOR actor
 ```
 
 ## Notes
@@ -89,6 +84,12 @@ flowchart TB
   transformer output and fetched headlines survive container restarts and
   redeploys. Without `DATABASE_URL` every `db.py` call is a no-op and the
   app is purely in-memory, as before.
+- **Batch ingestion:** `scripts/prewarm.py` is a second entry point beside
+  `app.py`. It calls the same `services/` modules (fetch → NLP → save via
+  `db.py`) without Streamlit, so a fast workstation or a nightly cron can
+  fill the PostgreSQL cache ahead of user demand. Because it reuses
+  `db.analysis_key` / `db.save_*`, its rows are byte-identical to what the
+  app would have written.
 - **Exception:** cheap, pure in-memory calls — `risk.evaluate`,
   `prices.summarize`, and the catalog loaders (`news.load_companies`,
   `risk.load_rules`) — are invoked from presentation code directly; they

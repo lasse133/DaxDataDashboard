@@ -32,6 +32,9 @@ flowchart LR
     p3(["3.0 Enrich and map<br/>audit risk signals"])
     p4(["4.0 Present dashboard results"])
     p5(["5.0 Export workpaper"])
+    p6(["6.0 Batch pre-warm<br/>scripts/prewarm.py<br/>(fast workstation or nightly cron)"])
+
+    operator["Team member / scheduler"]
 
 
     %% External systems
@@ -53,6 +56,8 @@ flowchart LR
     p2 -. "ticker and date range" .-> yahoo
     p3 -. "model download request<br/>(first run only)" .-> hf
     auditor -. "download click" .-> p5
+    operator -. "ticker/period selection<br/>or cron schedule" .-> p6
+    p6 -. "article query" .-> news
 
 
     %% Data flow = solid
@@ -67,6 +72,10 @@ flowchart LR
 
     pg -- "previously scored analyses<br/>(skips model inference)" --> p3
     p3 -- "new NLP analyses" --> pg
+
+    news -- "article data" --> p6
+    rules -- "ISA 315 topic labels" --> p6
+    p6 -- "pre-scored analyses<br/>and headline lists" --> pg
 
 
     hf -- "pretrained model weights<br/>(cached locally,<br/>inference runs in-app)" --> p3
@@ -91,8 +100,8 @@ flowchart LR
     classDef store fill:#ffe6a6,stroke:#d99000,stroke-width:1px,color:#000;
 
 
-    class auditor,news,yahoo,hf external;
-    class p1,p2,p3,p4,p5 process;
+    class auditor,operator,news,yahoo,hf external;
+    class p1,p2,p3,p4,p5,p6 process;
     class rules,cache,pg store;
 ```
 
@@ -105,3 +114,4 @@ flowchart LR
 | 3.0 | Enrich and map audit risk signals | Checks PostgreSQL `nlp_cache` per headline first (hit → model inference skipped). On a miss: clean headline → translated (DE→EN, MarianMT) → sentiment (FinBERT) + topic scores (DeBERTa zero-shot) → saved to `nlp_cache` → risk flags with ISA 315 references |
 | 4.0 | Present dashboard results | Results + price summary → risk radar, flagged-headline drill-downs, stock graph |
 | 5.0 | Export workpaper | Results + price summary → JSON snapshot and PDF workpaper, delivered as browser downloads |
+| 6.0 | Batch pre-warm | Same fetch + NLP pipeline as 2.0/3.0 but run outside the app (`scripts/prewarm.py`): loops over companies/quarters, skips already-scored headlines, writes headlines and analyses to PostgreSQL so users hit only the fast DB path |

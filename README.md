@@ -51,6 +51,8 @@ DaxDataDashboard/
 │   ├── nlp.py                      # translate + sentiment + zero-shot topics
 │   ├── risk.py                     # rule engine (analysis → risk flags)
 │   └── db.py                       # optional PostgreSQL persistence layer
+├── scripts/
+│   └── prewarm.py                  # batch ingestion: pre-score companies into the DB
 └── doc/
     ├── component-diagram.md        # Building blocks and dependencies
     ├── data-flow.md                # How data moves through the pipeline

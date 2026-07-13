@@ -35,6 +35,10 @@ flowchart LR
         end
     end
 
+    subgraph BATCH["«device» Fast workstation / server cron"]
+        PREWARM["scripts/prewarm.py<br/>batch ingestion: fetch + score<br/>headlines ahead of user demand"]
+    end
+
     GITHUB["GitHub<br/>lasse133/DaxDataDashboard"]
     YAHOO["Yahoo Finance"]
     NEWSAPI["GDELT + Google News RSS"]
@@ -47,13 +51,15 @@ flowchart LR
     APP -.->|"HTTPS"| YAHOO
     APP -.->|"HTTPS"| NEWSAPI
     HF -.->|"HTTPS · first run only"| CACHE
+    PREWARM -.->|"HTTPS"| NEWSAPI
+    PREWARM -->|"SQLAlchemy via DATABASE_URL<br/>(needs exposed port, or run on the server)"| PG
 
     classDef artifact fill:#0e8a761a,stroke:#0e8a76,color:#1c232d
     classDef store fill:#a97a1a1f,stroke:#a97a1a,color:#1c232d
     classDef ext fill:#66707d14,stroke:#66707d,stroke-dasharray:5 3,color:#1c232d
     classDef client fill:#2f6bd81a,stroke:#2f6bd8,color:#1c232d
 
-    class APP artifact
+    class APP,PREWARM artifact
     class CACHE,PG store
     class GITHUB,YAHOO,NEWSAPI,HF ext
     class BROWSER client
@@ -78,6 +84,13 @@ flowchart LR
   headlines (`headline_cache`, 24h TTL) are persisted across restarts and
   redeploys. Without `DATABASE_URL` the app degrades gracefully to
   in-memory-only operation.
+- **Batch ingestion path.** `scripts/prewarm.py` runs the same fetch + NLP
+  pipeline outside the app — on a fast workstation or as a nightly job —
+  and writes to the same two tables via `services/db.py`. Pre-warmed
+  companies then load from the database instantly; users only pay for
+  inference on headlines nobody has scored yet. Reaching Postgres from
+  outside requires a CapRover port mapping on `dax-db` (or run the script
+  on the server itself).
 - **Model cache lives inside the container**, so a redeploy or restart
   discards it and the first visitor afterwards waits for the ~1.5 GB
   re-download from HuggingFace.
