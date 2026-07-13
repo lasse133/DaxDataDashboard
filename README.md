@@ -66,10 +66,34 @@ docker build -t dax-dashboard .
 docker run -p 8501:8501 dax-dashboard
 ```
 
-`requirements.txt` also includes SQLAlchemy and psycopg2 for a PostgreSQL
-service provisioned alongside the app on CapRover
-(`srv-captain--dax-db:5432`); the app itself does not use the database yet —
-see [`doc/deployment-diagram.md`](doc/deployment-diagram.md).
+## PostgreSQL persistence (optional)
+
+The app runs fine without a database (everything stays in memory, as
+before). When the `DATABASE_URL` environment variable is set, `services/db.py`
+persists two things to PostgreSQL so they survive container restarts and
+redeploys:
+
+- **NLP results** (`nlp_cache`) — the transformer output per headline, the
+  most expensive computation in the app. Each headline is only ever
+  analyzed once, across all sessions and deployments.
+- **Fetched headlines** (`headline_cache`) — reporting-period fetch results,
+  reused for up to 24 hours so restarts don't re-hit the rate-limited
+  GDELT/Google News APIs. The **Fetch latest data** button always bypasses
+  this cache and overwrites it with fresh data.
+
+Tables are created automatically on first connection. If the database is
+unreachable the app logs it in the sidebar ("Persistence: PostgreSQL …")
+and continues without persistence — it never crashes because of the DB.
+
+On CapRover, with the one-click PostgreSQL app deployed as `dax-db`, set
+this on the **dashboard** app (App Configs → Environment Variables):
+
+```
+DATABASE_URL=postgresql://postgres:<password>@srv-captain--dax-db:5432/risk_data
+```
+
+`srv-captain--dax-db` is CapRover's internal DNS name for the database app;
+it only resolves inside the CapRover network.
 
 ## Using the app
 

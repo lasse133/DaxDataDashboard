@@ -34,7 +34,7 @@ import re
 import time
 from collections import Counter
 from io import BytesIO
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
@@ -47,7 +47,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from services import news, nlp, prices, risk
+from services import db, news, nlp, prices, risk
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +294,19 @@ def cached_headlines(
 
     `quarters` is a sorted tuple so the cache key is stable regardless of
     the multiselect widget's return order.
+
+    Results are also persisted to PostgreSQL (when configured) so container
+    restarts don't re-hit the rate-limited news APIs. Clicking "Fetch latest
+    data" sets `force_fresh_fetch`, which bypasses the DB read for that run;
+    the fresh result then overwrites the stored row.
     """
+    db_key = db.headlines_key(ticker, year, quarters)
+    force_fresh = st.session_state.pop("force_fresh_fetch", False)
+    if not force_fresh:
+        stored = db.get_headlines(db_key, max_age=timedelta(hours=24))
+        if stored is not None:
+            return stored
+
     diagnostics: list[news.FetchReport] = []
     hls = news.fetch_headlines_multi(
         ticker, year, quarters, diagnostics=diagnostics
@@ -329,6 +341,8 @@ def cached_headlines(
         }
         for d in diagnostics
     ]
+    if all_headlines:
+        db.save_headlines(db_key, all_headlines, diag_dicts)
     return all_headlines, diag_dicts
 
 
@@ -427,8 +441,18 @@ def cached_prices_range(
 
 @st.cache_data(show_spinner=False)
 def cached_analyze(title: str, language_hint: str, topics_key: str) -> dict:
-    """Per-headline NLP cache."""
-    
+    """Per-headline NLP cache.
+
+    Two cache layers: st.cache_data for the session, PostgreSQL (when
+    DATABASE_URL is configured) across restarts/redeploys — transformer
+    inference is the most expensive step in the app, so each headline is
+    only ever analyzed once.
+    """
+    db_key = db.analysis_key(title, language_hint, topics_key)
+    stored = db.get_analysis(db_key)
+    if stored is not None:
+        return stored
+
     # --- Data Cleaning Step ---
     # Strip the publisher name from the end of the Google News headline
     if " - " in title:
@@ -438,11 +462,13 @@ def cached_analyze(title: str, language_hint: str, topics_key: str) -> dict:
     # --------------------------
 
     labels = risk.classification_topic_labels()
-    
+
     # Pass the clean_title to the AI models instead of the raw title
     analysis = nlp.analyze(clean_title, topic_labels=labels, language_hint=language_hint)
-    
-    return analysis.as_dict()
+
+    result = analysis.as_dict()
+    db.save_analysis(db_key, title, language_hint, topics_key, result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -892,6 +918,9 @@ with st.sidebar:
             cached_analyze.clear()
             cached_headlines.clear()
             cached_prices.clear()
+            # Bypass the PostgreSQL headline cache for this one fetch so the
+            # user really gets fresh data; the result overwrites the DB row.
+            st.session_state.force_fresh_fetch = True
             # Force pipeline to rebuild on next run.
             st.session_state.pipeline_signature = ""
     st.divider()
@@ -903,6 +932,8 @@ with st.sidebar:
                 f"{spec['architecture']} | {spec['params']}  \n"
                 f"_{spec['purpose']}_"
             )
+
+    st.caption(f"Persistence: PostgreSQL {db.status()}")
 
     st.caption(
         "This tool **supports** the auditor's professional judgment. "

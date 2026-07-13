@@ -43,6 +43,7 @@ flowchart LR
     %% Data stores / artifacts
     rules[("Rule and alias catalog<br/>company_aliases.yaml<br/>isa315_map.yaml")]
     cache[("In-memory state<br/>st.cache_data: headlines, prices,<br/>NLP analyses · st.session_state:<br/>results + risk flags")]
+    pg[("PostgreSQL risk_data (dax-db)<br/>nlp_cache: model output per headline<br/>headline_cache: fetch results, 24h TTL")]
 
 
     %% Control / request flow = dashed
@@ -59,7 +60,13 @@ flowchart LR
     yahoo -- "daily OHLC stock prices" --> p2
 
 
+    pg -- "cached headlines<br/>(fresh row, skips news APIs)" --> p2
+    p2 -- "freshly fetched headlines" --> pg
+
     p2 -- "fetched articles<br/>and stock prices" --> p3
+
+    pg -- "previously scored analyses<br/>(skips model inference)" --> p3
+    p3 -- "new NLP analyses" --> pg
 
 
     hf -- "pretrained model weights<br/>(cached locally,<br/>inference runs in-app)" --> p3
@@ -86,7 +93,7 @@ flowchart LR
 
     class auditor,news,yahoo,hf external;
     class p1,p2,p3,p4,p5 process;
-    class rules,cache store;
+    class rules,cache,pg store;
 ```
 
 ## Process descriptions
@@ -94,7 +101,7 @@ flowchart LR
 | # | Process | Transformation |
 |---|---|---|
 | 1.0 | Select company, period and stock window | Sidebar selections → fetch parameters (ticker, year + quarters, price date range) |
-| 2.0 | Fetch external data | GDELT + Google News RSS headlines → publisher suffix stripped (`" - Source"`, RSS only; raw title kept) → alias-filtered, deduped list; Yahoo Finance → daily OHLC prices |
-| 3.0 | Enrich and map audit risk signals | Clean headline → translated (DE→EN, MarianMT) → sentiment (FinBERT) + topic scores (DeBERTa zero-shot) → risk flags with ISA 315 references |
+| 2.0 | Fetch external data | Checks PostgreSQL `headline_cache` first (fresh row within 24h → news APIs skipped; "Fetch latest data" bypasses). On a miss: GDELT + Google News RSS headlines → publisher suffix stripped (`" - Source"`, RSS only; raw title kept) → alias-filtered, deduped list → saved back to `headline_cache`; Yahoo Finance → daily OHLC prices |
+| 3.0 | Enrich and map audit risk signals | Checks PostgreSQL `nlp_cache` per headline first (hit → model inference skipped). On a miss: clean headline → translated (DE→EN, MarianMT) → sentiment (FinBERT) + topic scores (DeBERTa zero-shot) → saved to `nlp_cache` → risk flags with ISA 315 references |
 | 4.0 | Present dashboard results | Results + price summary → risk radar, flagged-headline drill-downs, stock graph |
 | 5.0 | Export workpaper | Results + price summary → JSON snapshot and PDF workpaper, delivered as browser downloads |

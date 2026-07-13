@@ -43,7 +43,7 @@ flowchart LR
     BROWSER -->|"HTTPS + WebSocket<br/>(CapRover nginx → :8501)"| APP
     GITHUB -.->|"captain-definition → docker build<br/>on deploy"| APPC
     APP -->|"loads model weights"| CACHE
-    APP -.->|"planned · SQLAlchemy + psycopg2"| PG
+    APP -->|"SQLAlchemy + psycopg2 via DATABASE_URL<br/>nlp_cache · headline_cache"| PG
     APP -.->|"HTTPS"| YAHOO
     APP -.->|"HTTPS"| NEWSAPI
     HF -.->|"HTTPS · first run only"| CACHE
@@ -71,11 +71,13 @@ flowchart LR
   `requirements.txt` pins the CPU-only torch wheel to keep the image small.
   A Docker `HEALTHCHECK` against Streamlit's `/_stcore/health` endpoint
   tells CapRover the app is alive.
-- **PostgreSQL is provisioned but not yet wired in.** A `dax-db` Postgres
+- **PostgreSQL is wired in via `services/db.py`.** A `dax-db` Postgres
   service runs on the same CapRover host (reachable to other apps as
-  `srv-captain--dax-db:5432`, database `risk_data`), and the SQLAlchemy +
-  psycopg2 connectors are already in `requirements.txt` — but the app code
-  does not read or write it yet. The dotted "planned" arrow marks that.
+  `srv-captain--dax-db:5432`, database `risk_data`). When `DATABASE_URL`
+  is set on the dashboard app, NLP results (`nlp_cache`) and fetched
+  headlines (`headline_cache`, 24h TTL) are persisted across restarts and
+  redeploys. Without `DATABASE_URL` the app degrades gracefully to
+  in-memory-only operation.
 - **Model cache lives inside the container**, so a redeploy or restart
   discards it and the first visitor afterwards waits for the ~1.5 GB
   re-download from HuggingFace.

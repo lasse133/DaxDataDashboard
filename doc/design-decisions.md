@@ -205,11 +205,11 @@ Things we explicitly chose *not* to build for the MVP:
 - **Fine-tuning** any model on labeled audit data. We have no dataset and
   pretrained inference is enough for a demo.
 - **Multi-user auth / user accounts.** Single-user demo tool.
-- **Persistent database.** All state is in-memory (session) + on-disk
-  YAML. Snapshot export is JSON-per-run. *Update:* a PostgreSQL service is
-  now provisioned on the CapRover host and the connectors (SQLAlchemy +
-  psycopg2) are in `requirements.txt`, but the app does not use it yet —
-  see §9.
+- ~~**Persistent database.**~~ *Now built:* `services/db.py` persists NLP
+  results and fetched headlines to the CapRover PostgreSQL service
+  (`dax-db`) when `DATABASE_URL` is set, so expensive transformer inference
+  and rate-limited news fetches survive restarts/redeploys. Without the
+  env var the app runs in-memory-only as before — see §9 and the README.
 - **Real distributed stream processor** (Kafka / Spark / Flink). Explicitly
   ruled out for simplicity.
 - **NER model** for company matching. Alias regex is enough.
@@ -231,7 +231,9 @@ Streamlit Community Cloud:
   ~12 h and lose the ~1.5 GB model cache; a self-hosted container stays up.
 - **Room to grow.** CapRover lets us run companion services on the same
   host — a PostgreSQL instance (`srv-captain--dax-db:5432`, db `risk_data`)
-  is already provisioned for future persistence.
+  runs alongside the app and is used by `services/db.py` to persist NLP
+  results and fetched headlines across restarts (when `DATABASE_URL` is
+  set on the dashboard app).
 - **Reproducible builds.** System deps (`build-essential`, `libpq-dev`) are
   pinned in the image; a Docker `HEALTHCHECK` on `/_stcore/health` lets
   CapRover detect a dead app.

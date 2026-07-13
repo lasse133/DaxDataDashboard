@@ -32,9 +32,11 @@ flowchart TB
         NEWS["news.py<br/>fetch · clean · filter news"]
         NLP["nlp.py<br/>translate · sentiment · topics<br/>(3 pretrained transformers)"]
         RISK["risk.py<br/>ISA 315 rule engine"]
+        DB["db.py<br/>PostgreSQL persistence<br/>(optional, read-through cache)"]
     end
 
     DOMAIN[("domain/*.yaml<br/>company aliases · 11 ISA 315 rules")]
+    PG[("PostgreSQL risk_data<br/>nlp_cache · headline_cache<br/>(dax-db container, via DATABASE_URL)")]
 
     YAHOO["Yahoo Finance"]
     NEWSAPI["GDELT + Google News RSS"]
@@ -48,7 +50,9 @@ flowchart TB
     MID --> NEWS
     MID --> NLP
     MID --> RISK
+    MID --> DB
 
+    DB -.-> PG
     NEWS -.-> DOMAIN
     RISK -.-> DOMAIN
     PRICES -.-> YAHOO
@@ -64,8 +68,8 @@ flowchart TB
 
     class UI ui
     class MID adapter
-    class PRICES,NEWS,NLP,RISK svc
-    class DOMAIN,STATE data
+    class PRICES,NEWS,NLP,RISK,DB svc
+    class DOMAIN,STATE,PG data
     class YAHOO,NEWSAPI,HF ext
     class AUDITOR actor
 ```
@@ -79,6 +83,12 @@ flowchart TB
   wrapper functions (`app.py:280-435`), which return memoized results on
   reruns; `st.session_state` carries the streaming pipeline (queue,
   results, paused flag) across reruns.
+- **Two cache layers:** the `@st.cache_data` wrappers memoize within the
+  running process; `db.py` adds an optional PostgreSQL layer underneath
+  (checked before fetching news or running models, written after), so
+  transformer output and fetched headlines survive container restarts and
+  redeploys. Without `DATABASE_URL` every `db.py` call is a no-op and the
+  app is purely in-memory, as before.
 - **Exception:** cheap, pure in-memory calls — `risk.evaluate`,
   `prices.summarize`, and the catalog loaders (`news.load_companies`,
   `risk.load_rules`) — are invoked from presentation code directly; they
