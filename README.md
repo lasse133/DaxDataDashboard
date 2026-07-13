@@ -1,168 +1,158 @@
 # DAX 40 Audit Risk Radar
 
-A Streamlit dashboard that helps auditors satisfy **ISA 315** ("Identifying and
-Assessing the Risks of Material Misstatement") for DAX 40 companies. It streams
-live news and daily stock prices for a selected company and quarter, runs each
-headline through pretrained deep-learning models, and maps the output to
-concrete audit and legal references.
+A Streamlit dashboard that helps auditors with **ISA 315** ("Identifying and
+Assessing the Risks of Material Misstatement") for DAX 40 companies. Pick a
+company and a reporting period; the app fetches news headlines and daily stock
+prices, runs each headline through pretrained deep-learning models (translation,
+financial sentiment, zero-shot topic classification), and maps the results to a
+catalog of ISA 315 audit rules — producing a risk radar with drill-downs into
+the exact signals, audit references, and suggested procedures behind every flag.
 
 > **This tool supports the auditor's professional judgment. It does not perform
 > the ISA 315 risk assessment itself.**
 
----
+**Live demo:** https://dax-dashboard.178.105.201.137.nip.io/
 
-## Required technologies
+## Features
 
-| Requirement | How it is satisfied |
-|---|---|
-| **Distributed / stream processing (Streamlit)** | Headlines flow through a staged pipeline (fetch → clean publisher suffix → language detect → translate → sentiment + topics → risk mapping). The app processes one headline per `st.rerun()`, so rows appear incrementally and Pause / Resume controls stay responsive. |
-| **Deep learning** | Three pretrained transformer models used for inference only: MarianMT (translation), FinBERT (financial sentiment), DeBERTa-v3-MNLI (zero-shot topic classification). See the sidebar's "Deep-learning stack" panel. |
+- **Live data, no API keys** — headlines from GDELT DOC 2.0 and Google News RSS
+  (English + German), prices from Yahoo Finance via `yfinance`.
+- **Deep-learning pipeline** — three pretrained transformers, inference only:
+  MarianMT (DE→EN translation), FinBERT (financial sentiment), DeBERTa-v3-MNLI
+  (zero-shot topic scoring). Headlines are processed one at a time with
+  Pause / Resume controls, so results stream into the table as they finish.
+- **Rules-as-data** — the ISA 315 rule catalog lives in
+  `domain/isa315_map.yaml`, not in Python. An audit partner can review or edit
+  the rules without reading code.
+- **Risk radar & drill-downs** — flags aggregated by category and severity;
+  every flag shows the model scores that triggered it plus the ISA / IDW
+  paragraphs and suggested audit procedures.
+- **Workpaper export** — download the full run as a JSON snapshot or a PDF
+  workpaper.
+- **Optional PostgreSQL persistence** — model output and fetched headlines are
+  cached in a database so they survive restarts and redeploys (see
+  [Database](#database-optional)).
 
-## Data sources (all free, no API key required)
+## Project structure
 
-- **Prices** — Yahoo Finance via `yfinance` (daily OHLC over the selected quarter).
-- **News** — GDELT DOC 2.0 API + Google News RSS (English and German).
-
-## Setup with uv
-
-Install `uv` once if it is not already available:
-
-```bash
-pip install uv
+```
+DaxDataDashboard/
+├── app.py                          # Streamlit UI (presentation layer only)
+├── requirements.txt
+├── pyproject.toml                  # uv-compatible project definition
+├── dockerfile                      # Container image (Python 3.12-slim, port 8501)
+├── captain-definition              # CapRover deploy config (points at dockerfile)
+├── domain/
+│   ├── company_aliases.yaml        # DAX 40 tickers + name aliases for filtering
+│   └── isa315_map.yaml             # ISA 315 rule catalog (rules-as-data)
+├── services/
+│   ├── news.py                     # GDELT + Google News RSS: fetch, clean, dedupe, filter
+│   ├── prices.py                   # yfinance wrapper (daily OHLC)
+│   ├── nlp.py                      # translate + sentiment + zero-shot topics
+│   ├── risk.py                     # rule engine (analysis → risk flags)
+│   └── db.py                       # optional PostgreSQL persistence layer
+└── doc/
+    ├── component-diagram.md        # Building blocks and dependencies
+    ├── data-flow.md                # How data moves through the pipeline
+    ├── deployment-diagram.md       # Docker / CapRover physical view
+    ├── design-decisions.md         # Architecture and design rationale
+    └── risk-radar-output.md        # How to interpret the output
 ```
 
-Then run the dashboard from this folder:
+`app.py` is presentation only: all I/O, model inference, and rule evaluation
+live in `services/`, and all audit knowledge lives in `domain/*.yaml`.
+
+## Getting started
+
+Requires Python 3.12+. The first run downloads the three transformer models
+(~1.5 GB) from HuggingFace and caches them locally; subsequent runs are fast.
+
+**With [uv](https://github.com/astral-sh/uv)** (manages the virtualenv for you):
 
 ```bash
 uv run streamlit run app.py
 ```
 
-`uv` creates and manages the virtual environment automatically from
-`pyproject.toml`.
-
-## Setup with plain venv
+**With plain venv:**
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate # or .\.venv\Scripts\Activate.ps1
+source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The first run downloads three transformer models (~1.5 GB total) from
-HuggingFace and caches them locally. Subsequent runs are fast.
-
-## Docker / CapRover deployment
-
-The repo ships with a `dockerfile` (Python 3.12-slim, CPU-only torch,
-Streamlit on port 8501 with a `/_stcore/health` healthcheck) and a
-`captain-definition` so it can be deployed to a [CapRover](https://caprover.com)
-server as-is.
-
-Run locally with Docker:
+**With Docker:**
 
 ```bash
 docker build -t dax-dashboard .
 docker run -p 8501:8501 dax-dashboard
 ```
 
-## PostgreSQL persistence (optional)
+Then open http://localhost:8501.
 
-The app runs fine without a database (everything stays in memory, as
-before). When the `DATABASE_URL` environment variable is set, `services/db.py`
-persists two things to PostgreSQL so they survive container restarts and
-redeploys:
+## Usage
 
-- **NLP results** (`nlp_cache`) — the transformer output per headline, the
-  most expensive computation in the app. Each headline is only ever
-  analyzed once, across all sessions and deployments.
-- **Fetched headlines** (`headline_cache`) — reporting-period fetch results,
-  reused for up to 24 hours so restarts don't re-hit the rate-limited
-  GDELT/Google News APIs. The **Fetch latest data** button always bypasses
-  this cache and overwrites it with fresh data.
+1. Pick a DAX 40 company, a year, and one or more quarters in the sidebar.
+   Stock prices default to year-to-date and can be switched to a custom range.
+2. Click **Fetch latest data**. Headlines are fetched, filtered to those that
+   actually mention the company, and processed one by one — rows appear in the
+   results table as each finishes (Pause / Resume / Reset any time).
+3. Review the **Risk radar** and open any flagged headline to see the
+   deep-learning signals, the ISA / IDW references, and suggested procedures.
+4. Export the run as a JSON snapshot or PDF workpaper.
+
+The "How this report works" expander in the app explains the pipeline and shows
+the live rule catalog. For interpreting scores and severity labels, see
+[`doc/risk-radar-output.md`](doc/risk-radar-output.md).
+
+## Database (optional)
+
+The app runs fully in-memory by default. If the `DATABASE_URL` environment
+variable is set, `services/db.py` persists to PostgreSQL:
+
+- **`nlp_cache`** — the transformer output per headline (the app's most
+  expensive computation), so each headline is only ever analyzed once, across
+  all sessions and deployments.
+- **`headline_cache`** — fetched headlines per company/period, reused for up to
+  24 hours so restarts don't re-hit the rate-limited news APIs. The
+  **Fetch latest data** button always bypasses this cache and refreshes it.
 
 Tables are created automatically on first connection. If the database is
-unreachable the app logs it in the sidebar ("Persistence: PostgreSQL …")
-and continues without persistence — it never crashes because of the DB.
+missing or unreachable, the app simply runs without persistence — the sidebar
+shows the current connection state.
 
-On CapRover, with the one-click PostgreSQL app deployed as `dax-db`, set
-this on the **dashboard** app (App Configs → Environment Variables):
+```bash
+export DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
+```
+
+## Deployment (CapRover)
+
+The repo deploys to a [CapRover](https://caprover.com) server as-is: the
+`captain-definition` points CapRover at the `dockerfile`, and a healthcheck on
+Streamlit's `/_stcore/health` endpoint tells CapRover when the app is alive.
+
+```bash
+npx caprover login    # once
+npx caprover deploy   # pick server, branch, and app
+```
+
+With CapRover's one-click PostgreSQL app deployed alongside (e.g. as `dax-db`),
+set `DATABASE_URL` on the dashboard app under App Configs → Environment
+Variables, using the internal hostname:
 
 ```
 DATABASE_URL=postgresql://postgres:<password>@srv-captain--dax-db:5432/risk_data
 ```
 
-`srv-captain--dax-db` is CapRover's internal DNS name for the database app;
-it only resolves inside the CapRover network.
-
-## Using the app
-
-1. Pick a DAX 40 company from the sidebar.
-2. Choose a workspace:
-   - **Reporting period** for quarter-based audit risk scoring.
-   - **Market news** for fast external-news monitoring without running the ML pipeline.
-   - **Company channels** for company-owned communications such as press
-     releases, investor relations, announcements, and indexed social posts.
-3. In **Reporting period**, pick one or more quarters and click
-   **🔄 Fetch latest data**. Headlines are fetched and processed one by one —
-   rows appear in the results table as each finishes.
-   Stock prices default to year-to-date, from January 1 of the current year to
-   today, and can be changed to a custom historical range in the sidebar.
-4. Review the aggregated **Risk radar** and open any expander to see:
-   - the exact deep-learning signals (sentiment score, matched topics),
-   - the ISA / IDW paragraphs that apply,
-   - suggested audit procedures.
-5. Export the reporting-period workpaper as JSON or PDF. The PDF export is
-   headline-level evidence; it does not summarize full article bodies.
-
-The lightweight news workspaces include keyword search and risk-driver term
-charts for quick auditor scanning.
-
-For a detailed explanation of the risk radar, top-topic scores, and
-high/medium/low flag labels, see
-[`doc/risk-radar-output.md`](doc/risk-radar-output.md).
-
-## Project layout
-
-```
-dax/
-├── app.py                          # Streamlit UI (thin — presentation only)
-├── requirements.txt
-├── dockerfile                      # Container image (Python 3.12-slim, port 8501)
-├── captain-definition              # CapRover deploy config (points at dockerfile)
-├── doc/
-│   ├── component-diagram.md        # Building blocks and dependencies
-│   ├── data-flow.md                # Mermaid diagrams for the pipeline
-│   ├── deployment-diagram.md       # Docker/CapRover physical view
-│   ├── design-decisions.md         # Architecture and design rationale
-│   └── risk-radar-output.md        # How to interpret the output
-├── domain/
-│   ├── company_aliases.yaml        # 40 tickers + name aliases for filtering
-│   └── isa315_map.yaml             # ISA 315 rule catalog (rules-as-data)
-└── services/
-    ├── news.py                     # GDELT + Google News RSS, dedupe + filter
-    ├── prices.py                   # yfinance wrapper
-    ├── nlp.py                      # translate + sentiment + zero-shot topics
-    └── risk.py                     # rule engine (analysis → RiskFlag[])
-```
-
-## Design principles
-
-- **Rules-as-data.** All audit rules live in `domain/isa315_map.yaml`, not in
-  Python. An audit partner can review the catalog without reading code.
-- **Manual refresh only.** The page is frozen until the user clicks Refresh,
-  so screenshots are stable — important for workpapers.
-- **Traceable flags.** Every flag exposes the deep-learning outputs that
-  triggered it (topic scores, sentiment label + confidence) and the exact
-  ISA / IDW paragraphs invoked.
-- **Reproducibility.** Pretrained model IDs are pinned; language detection is
-  seeded; the snapshot export contains the full model registry.
+See [`doc/deployment-diagram.md`](doc/deployment-diagram.md) for the full
+physical view.
 
 ## Known limitations
 
-- Free news sources have limited historical depth. Older quarters may return
-  few or no results — this is expected.
-- Zero-shot classification is imperfect; scores are thresholded but auditors
+- Free news sources have limited historical depth; older quarters may return
+  few or no results.
+- Zero-shot classification is imperfect. Scores are thresholded, but auditors
   should always review flagged headlines before acting on them.
 - DAX 40 index composition changes ~annually. Verify `company_aliases.yaml`
-  against the current index constituents before an engagement.
+  against the current constituents before an engagement.
