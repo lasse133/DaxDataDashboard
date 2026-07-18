@@ -21,48 +21,37 @@ the browser only renders the Streamlit frontend.
 
 ```mermaid
 flowchart LR
-    subgraph CLIENT["«device» Auditor's computer"]
-        BROWSER["Web browser<br/>renders Streamlit frontend"]
-    end
+ subgraph APPC["«container» dax dashboard · python:3.12-slim"]
+        APP["Streamlit server :8501<br>app.py · services/ · domain/*.yaml"]
+  end
+ subgraph DBC["«container» dax-db"]
+        PG[("PostgreSQL<br>srv-captain--dax-db:5432<br>db: risk_data")]
+  end
+ subgraph CAPROVER["«node» CapRover server (Docker host)"]
+        APPC
+        DBC
+  end
+ subgraph BATCH["«device» Local PC"]
+        PREWARM["scripts/prewarm.py<br>batch ingestion: fetch + score<br>headlines ahead of user demand"]
+  end
+    GITHUB["GitHub<br>DaxDataDashboard"] -. "captain-definition → docker build<br>on deploy" .-> APPC
+    APP --  DATABASE_URL --> PG
+    APP -. HTTPS .-> YAHOO["Yahoo Finance"] & NEWSAPI["GDELT + Google News RSS"]
+    PREWARM -. HTTPS .-> NEWSAPI
+    PREWARM L_PREWARM_PG_0@--  DATABASE_URL --> PG
 
-    subgraph CAPROVER["«node» CapRover server (Docker host)"]
-        subgraph APPC["«container» dax dashboard · python:3.12-slim"]
-            APP["Streamlit server :8501<br/>app.py · services/ · domain/*.yaml"]
-            CACHE[("HF model cache<br/>~1.5 GB · filled on first run")]
-        end
-        subgraph DBC["«container» dax-db"]
-            PG[("PostgreSQL<br/>srv-captain--dax-db:5432<br/>db: risk_data")]
-        end
-    end
-
-    subgraph BATCH["«device» Fast workstation / server cron"]
-        PREWARM["scripts/prewarm.py<br/>batch ingestion: fetch + score<br/>headlines ahead of user demand"]
-    end
-
-    GITHUB["GitHub<br/>lasse133/DaxDataDashboard"]
-    YAHOO["Yahoo Finance"]
-    NEWSAPI["GDELT + Google News RSS"]
-    HF["HuggingFace Hub"]
-
-    BROWSER -->|"HTTPS + WebSocket<br/>(CapRover nginx → :8501)"| APP
-    GITHUB -.->|"captain-definition → docker build<br/>on deploy"| APPC
-    APP -->|"loads model weights"| CACHE
-    APP -->|"SQLAlchemy + psycopg2 via DATABASE_URL<br/>nlp_cache · headline_cache"| PG
-    APP -.->|"HTTPS"| YAHOO
-    APP -.->|"HTTPS"| NEWSAPI
-    HF -.->|"HTTPS · first run only"| CACHE
-    PREWARM -.->|"HTTPS"| NEWSAPI
-    PREWARM -->|"SQLAlchemy via DATABASE_URL<br/>(needs exposed port, or run on the server)"| PG
-
+     APP:::artifact
+     PG:::store
+     PREWARM:::artifact
+     GITHUB:::ext
+     YAHOO:::ext
+     NEWSAPI:::ext
     classDef artifact fill:#0e8a761a,stroke:#0e8a76,color:#1c232d
     classDef store fill:#a97a1a1f,stroke:#a97a1a,color:#1c232d
     classDef ext fill:#66707d14,stroke:#66707d,stroke-dasharray:5 3,color:#1c232d
     classDef client fill:#2f6bd81a,stroke:#2f6bd8,color:#1c232d
 
-    class APP,PREWARM artifact
-    class CACHE,PG store
-    class GITHUB,YAHOO,NEWSAPI,HF ext
-    class BROWSER client
+    L_PREWARM_PG_0@{ curve: linear }
 ```
 
 ## Notes
